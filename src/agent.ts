@@ -18,9 +18,9 @@ export class ProblemAgent {
   async generateProblems({ count }: GenerateProblemsRequest): Promise<GenerateProblemsResponse> {
     const userPrompt = `Generate ${count} Java OOP problems with test cases.`;
 
-    const completion = await openai.responses.create({
+    const completion = await openai.chat.completions.create({
       model: OPENAI_MODEL,
-      input: [
+      messages: [
         {
           role: "system",
           content: PROBLEM_AGENT_SYSTEM_PROMPT,
@@ -33,9 +33,9 @@ export class ProblemAgent {
       temperature: 0.2,
     });
 
-    const text = completion.output[0].content[0].type === "output_text"
-      ? completion.output[0].content[0].text
-      : JSON.stringify(completion.output);
+    const text =
+      completion.choices[0]?.message?.content ??
+      JSON.stringify(completion.choices);
 
     // TODO: implement robust parsing based on the specified output format
     const problems: GeneratedProblem[] = [];
