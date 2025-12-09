@@ -3,7 +3,15 @@ import jwt from "jsonwebtoken";
 import { Request, Response, NextFunction } from "express";
 import { userDb } from "./database";
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+const rawJwtSecret = process.env.JWT_SECRET;
+
+if (!rawJwtSecret || rawJwtSecret.trim().length < 32) {
+  throw new Error(
+    "JWT_SECRET environment variable must be set to a strong, random secret (at least 32 characters)."
+  );
+}
+
+const JWT_SECRET: string = rawJwtSecret;
 const JWT_EXPIRES_IN = "7d";
 
 export interface AuthRequest extends Request {
@@ -33,7 +41,31 @@ export function generateToken(userId: number, username: string, email: string): 
 
 export function verifyToken(token: string): { id: number; username: string; email: string } | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as { id: number; username: string; email: string };
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    if (!decoded || typeof decoded !== "object") {
+      return null;
+    }
+
+    const payload = decoded as jwt.JwtPayload & {
+      id?: number;
+      username?: string;
+      email?: string;
+    };
+
+    if (
+      typeof payload.id !== "number" ||
+      typeof payload.username !== "string" ||
+      typeof payload.email !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      id: payload.id,
+      username: payload.username,
+      email: payload.email,
+    };
   } catch (err) {
     return null;
   }

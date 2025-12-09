@@ -82,19 +82,31 @@ app.post("/submit", optionalAuth, async (req: AuthRequest, res) => {
 
     const result = await runJudge(code, testSuite);
 
-    // Save submission to database if user is authenticated
-    if (req.user && activityId && problemId) {
-      const totalTests = result.passedTests.length + result.failedTests.length;
-      submissionDb.create(
-        req.user.id,
-        activityId,
-        problemId,
-        code,
-        result.success,
-        result.passedTests.length,
-        totalTests,
-        result.executionTimeMs
-      );
+    // Save submission to database if user is authenticated and owns the activity/problem
+    if (req.user && typeof activityId === "string" && typeof problemId === "string") {
+      const dbActivity = activityDb.findById(activityId);
+      if (dbActivity && dbActivity.user_id === req.user.id) {
+        try {
+          const problems: GeneratedProblem[] = JSON.parse(dbActivity.problems);
+          const problemExists = problems.some((p) => p.id === problemId);
+
+          if (problemExists) {
+            const totalTests = result.passedTests.length + result.failedTests.length;
+            submissionDb.create(
+              req.user.id,
+              activityId,
+              problemId,
+              code,
+              result.success,
+              result.passedTests.length,
+              totalTests,
+              result.executionTimeMs
+            );
+          }
+        } catch (parseErr) {
+          console.error("Failed to parse activity problems while saving submission:", parseErr);
+        }
+      }
     }
 
     res.json(result);
@@ -320,13 +332,18 @@ app.post("/activities", authenticateToken, async (req: AuthRequest, res) => {
   }
 });
 
-// Fetch an existing activity by id
-app.get("/activities/:id", optionalAuth, (req: AuthRequest, res) => {
+// Fetch an existing activity by id for the authenticated user
+app.get("/activities/:id", authenticateToken, (req: AuthRequest, res) => {
   const id = req.params.id as string;
   const dbActivity = activityDb.findById(id);
-  
+
   if (!dbActivity) {
     return res.status(404).json({ error: "Activity not found." });
+  }
+
+  // Enforce ownership: users may only access their own activities
+  if (dbActivity.user_id !== req.user!.id) {
+    return res.status(403).json({ error: "You are not authorized to access this activity." });
   }
 
   const activity: Activity = {
