@@ -19,13 +19,19 @@ function execAsync(command, cwd) {
         });
     });
 }
+function inferClassName(source, fallback) {
+    const match = source.match(/class\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    return match && match[1] ? match[1] : fallback;
+}
 async function runJudge(userCode, testSuite) {
     const start = Date.now();
     const tmp = (0, fs_1.mkdtempSync)((0, path_1.join)((0, os_1.tmpdir)(), "codem-judge-"));
     try {
-        // For now we simply write two files; Docker integration will mount this directory.
-        (0, fs_1.writeFileSync)((0, path_1.join)(tmp, "Solution.java"), userCode, "utf8");
-        (0, fs_1.writeFileSync)((0, path_1.join)(tmp, "SolutionTest.java"), testSuite, "utf8");
+        const userClassName = inferClassName(userCode, "Solution");
+        const testClassName = inferClassName(testSuite, `${userClassName}Test`);
+        // Write code using inferred class names so filenames match Java expectations.
+        (0, fs_1.writeFileSync)((0, path_1.join)(tmp, `${userClassName}.java`), userCode, "utf8");
+        (0, fs_1.writeFileSync)((0, path_1.join)(tmp, `${testClassName}.java`), testSuite, "utf8");
         // This assumes a Docker image named codem-java-judge is available.
         const dockerCmd = [
             "docker run --rm",

@@ -57,12 +57,21 @@ class ProblemAgent {
             const promptVariant = i === 0
                 ? reinforcedPrompt
                 : `${reinforcedPrompt}\nPreviously you returned ${lastCount} problems. You must return exactly ${count} problems now. No explanations.`;
-            const result = await runOnce(promptVariant);
-            lastResult = result;
-            if (result.problems.length === count) {
-                return result;
+            try {
+                const result = await runOnce(promptVariant);
+                lastResult = result;
+                if (result.problems.length === count) {
+                    return result;
+                }
+                lastCount = result.problems.length;
             }
-            lastCount = result.problems.length;
+            catch (err) {
+                lastResult = null;
+                if (i === 2) {
+                    throw err;
+                }
+                // retry with the next reinforced prompt
+            }
         }
         throw new Error(lastResult
             ? `Failed to generate exactly ${count} problems after retries; last had ${lastResult.problems.length}.`
@@ -108,13 +117,15 @@ class ProblemAgent {
             const hasAssertionsImport = /org\.junit\.jupiter\.api\.Assertions/.test(testSuite) ||
                 /static org\.junit\.jupiter\.api\.Assertions\.\*/.test(testSuite);
             const referencesClass = new RegExp(`\\b${className}\\b`).test(testSuite);
-            const needsSyntheticSuite = !testSuite.trim() ||
+            const invalidStructure = !testSuite.trim() ||
                 hasPackage ||
                 testCount !== 8 ||
                 !hasTestImport ||
                 !hasAssertionsImport ||
                 !referencesClass;
-            if (needsSyntheticSuite) {
+            // If the model gave us something structurally broken, fall back to a
+            // synthetic but compilable test suite instead of failing the whole activity.
+            if (invalidStructure) {
                 testSuite = this.buildDefaultTestSuite(className);
             }
             const constraints = typeof pRaw.constraints === "string" && pRaw.constraints.trim()
