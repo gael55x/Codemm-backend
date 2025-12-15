@@ -1,26 +1,12 @@
-import Anthropic from "@anthropic-ai/sdk";
-import JSON5 from "json5";
-import { jsonrepair } from "jsonrepair";
 import {
   GeneratedProblem,
   CLAUDE_MODEL,
   PROBLEM_AGENT_SYSTEM_PROMPT,
   STRUCTURED_JSON_INSTRUCTIONS,
 } from "./config";
-
-let anthropicClient: Anthropic | null = null;
-
-function getAnthropicClient(): Anthropic {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error("ANTHROPIC_API_KEY is not set in the environment.");
-  }
-  if (!anthropicClient) {
-    anthropicClient = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    });
-  }
-  return anthropicClient;
-}
+import { getAnthropicClient } from "./infra/llm/anthropic";
+import { tryParseJson } from "./utils/jsonParser";
+import { buildDefaultClassSkeleton } from "./utils/javaCodegen";
 
 export interface GenerateProblemsRequest {
   count: number;
@@ -109,7 +95,7 @@ export class ProblemAgent {
   }
 
   private parseAndValidate(text: string, expectedCount: number): GeneratedProblem[] {
-    const parsed = this.tryParseJson(text);
+    const parsed = tryParseJson(text);
     if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as any).problems)) {
       throw new Error("Agent response missing problems array.");
     }
@@ -145,7 +131,7 @@ export class ProblemAgent {
 
       // If skeleton missing or has package, synthesize a clean one
       if (!classSkeleton.trim() || /^\s*package\s+/m.test(classSkeleton)) {
-        classSkeleton = this.buildDefaultClassSkeleton(className);
+        classSkeleton = buildDefaultClassSkeleton(className);
       }
 
       // Prepare test suite
@@ -212,60 +198,6 @@ export class ProblemAgent {
     return problems;
   }
 
-  private tryParseJson(text: string): any {
-    let cleaned = text.trim();
-    // Strip common markdown fences
-    cleaned = cleaned.replace(/```json/gi, "").replace(/```/g, "").trim();
-
-    const tryParseCandidate = (candidate: string) => {
-      // strict
-      try {
-        return JSON.parse(candidate);
-      } catch (_) {
-        /* ignore */
-      }
-      // lenient
-      try {
-        return JSON5.parse(candidate);
-      } catch (_) {
-        /* ignore */
-      }
-      // repair then parse
-      try {
-        const repaired = jsonrepair(candidate);
-        return JSON.parse(repaired);
-      } catch (_) {
-        // last resort: JSON5 after repair
-        const repaired = jsonrepair(candidate);
-        return JSON5.parse(repaired);
-      }
-    };
-
-    // 1) direct parse
-    try {
-      return tryParseCandidate(cleaned);
-    } catch (_) {
-      // 2) try to extract the first { ... } block (greedy to last })
-      const start = cleaned.indexOf("{");
-      const end = cleaned.lastIndexOf("}");
-      if (start !== -1 && end !== -1 && end > start) {
-        const slice = cleaned.slice(start, end + 1);
-        return tryParseCandidate(slice);
-      }
-      // 3) try array block
-      const sArr = cleaned.indexOf("[");
-      const eArr = cleaned.lastIndexOf("]");
-      if (sArr !== -1 && eArr !== -1 && eArr > sArr) {
-        const slice = cleaned.slice(sArr, eArr + 1);
-        return tryParseCandidate(slice);
-      }
-      throw _;
-    }
-  }
-
-  private buildDefaultClassSkeleton(className: string): string {
-    return `public class ${className} {\n\n    // TODO: implement solution\n\n}\n`;
-  }
 }
 
 

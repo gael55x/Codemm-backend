@@ -1,31 +1,16 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProblemAgent = void 0;
-const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
-const json5_1 = __importDefault(require("json5"));
-const jsonrepair_1 = require("jsonrepair");
 const config_1 = require("./config");
-let anthropicClient = null;
-function getAnthropicClient() {
-    if (!process.env.ANTHROPIC_API_KEY) {
-        throw new Error("ANTHROPIC_API_KEY is not set in the environment.");
-    }
-    if (!anthropicClient) {
-        anthropicClient = new sdk_1.default({
-            apiKey: process.env.ANTHROPIC_API_KEY,
-        });
-    }
-    return anthropicClient;
-}
+const anthropic_1 = require("./infra/llm/anthropic");
+const jsonParser_1 = require("./utils/jsonParser");
+const javaCodegen_1 = require("./utils/javaCodegen");
 class ProblemAgent {
     async generateProblems({ count, prompt, validate = true, enforceCount = true, }) {
         const basePrompt = prompt ??
             `Generate exactly ${count} Java OOP problems with test cases following the required JSON format. Respond ONLY with JSON.`;
         const reinforcedPrompt = `${basePrompt}\nReturn exactly ${count} problems in the JSON "problems" array. Do not return fewer. Do not include any prose or markdown.`;
-        const anthropic = getAnthropicClient();
+        const anthropic = (0, anthropic_1.getAnthropicClient)();
         const runOnce = async (overridePrompt) => {
             const completion = await anthropic.messages.create({
                 model: config_1.CLAUDE_MODEL,
@@ -78,7 +63,7 @@ class ProblemAgent {
             : "Failed to generate problems.");
     }
     parseAndValidate(text, expectedCount) {
-        const parsed = this.tryParseJson(text);
+        const parsed = (0, jsonParser_1.tryParseJson)(text);
         if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.problems)) {
             throw new Error("Agent response missing problems array.");
         }
@@ -105,7 +90,7 @@ class ProblemAgent {
             let className = clsMatch && clsMatch[1] ? clsMatch[1] : `Problem${idx + 1}`;
             // If skeleton missing or has package, synthesize a clean one
             if (!classSkeleton.trim() || /^\s*package\s+/m.test(classSkeleton)) {
-                classSkeleton = this.buildDefaultClassSkeleton(className);
+                classSkeleton = (0, javaCodegen_1.buildDefaultClassSkeleton)(className);
             }
             // Prepare test suite
             let testSuite = typeof pRaw.testSuite === "string" && pRaw.testSuite.trim()
@@ -155,61 +140,6 @@ class ProblemAgent {
             throw new Error(`Expected ${expectedCount} problems but received ${problems.length} from agent response.`);
         }
         return problems;
-    }
-    tryParseJson(text) {
-        let cleaned = text.trim();
-        // Strip common markdown fences
-        cleaned = cleaned.replace(/```json/gi, "").replace(/```/g, "").trim();
-        const tryParseCandidate = (candidate) => {
-            // strict
-            try {
-                return JSON.parse(candidate);
-            }
-            catch (_) {
-                /* ignore */
-            }
-            // lenient
-            try {
-                return json5_1.default.parse(candidate);
-            }
-            catch (_) {
-                /* ignore */
-            }
-            // repair then parse
-            try {
-                const repaired = (0, jsonrepair_1.jsonrepair)(candidate);
-                return JSON.parse(repaired);
-            }
-            catch (_) {
-                // last resort: JSON5 after repair
-                const repaired = (0, jsonrepair_1.jsonrepair)(candidate);
-                return json5_1.default.parse(repaired);
-            }
-        };
-        // 1) direct parse
-        try {
-            return tryParseCandidate(cleaned);
-        }
-        catch (_) {
-            // 2) try to extract the first { ... } block (greedy to last })
-            const start = cleaned.indexOf("{");
-            const end = cleaned.lastIndexOf("}");
-            if (start !== -1 && end !== -1 && end > start) {
-                const slice = cleaned.slice(start, end + 1);
-                return tryParseCandidate(slice);
-            }
-            // 3) try array block
-            const sArr = cleaned.indexOf("[");
-            const eArr = cleaned.lastIndexOf("]");
-            if (sArr !== -1 && eArr !== -1 && eArr > sArr) {
-                const slice = cleaned.slice(sArr, eArr + 1);
-                return tryParseCandidate(slice);
-            }
-            throw _;
-        }
-    }
-    buildDefaultClassSkeleton(className) {
-        return `public class ${className} {\n\n    // TODO: implement solution\n\n}\n`;
     }
 }
 exports.ProblemAgent = ProblemAgent;

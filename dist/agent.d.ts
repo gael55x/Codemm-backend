@@ -12,7 +12,5 @@ export interface GenerateProblemsResponse {
 export declare class ProblemAgent {
     generateProblems({ count, prompt, validate, enforceCount, }: GenerateProblemsRequest): Promise<GenerateProblemsResponse>;
     private parseAndValidate;
-    private tryParseJson;
-    private buildDefaultClassSkeleton;
 }
 //# sourceMappingURL=agent.d.ts.map
