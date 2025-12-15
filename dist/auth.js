@@ -12,7 +12,11 @@ exports.optionalAuth = optionalAuth;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const database_1 = require("./database");
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+const rawJwtSecret = process.env.JWT_SECRET;
+if (!rawJwtSecret || rawJwtSecret.trim().length < 32) {
+    throw new Error("JWT_SECRET environment variable must be set to a strong, random secret (at least 32 characters).");
+}
+const JWT_SECRET = rawJwtSecret;
 const JWT_EXPIRES_IN = "7d";
 async function hashPassword(password) {
     return bcryptjs_1.default.hash(password, 10);
@@ -27,7 +31,21 @@ function generateToken(userId, username, email) {
 }
 function verifyToken(token) {
     try {
-        return jsonwebtoken_1.default.verify(token, JWT_SECRET);
+        const decoded = jsonwebtoken_1.default.verify(token, JWT_SECRET);
+        if (!decoded || typeof decoded !== "object") {
+            return null;
+        }
+        const payload = decoded;
+        if (typeof payload.id !== "number" ||
+            typeof payload.username !== "string" ||
+            typeof payload.email !== "string") {
+            return null;
+        }
+        return {
+            id: payload.id,
+            username: payload.username,
+            email: payload.email,
+        };
     }
     catch (err) {
         return null;

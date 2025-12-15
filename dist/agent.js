@@ -123,10 +123,10 @@ class ProblemAgent {
                 !hasTestImport ||
                 !hasAssertionsImport ||
                 !referencesClass;
-            // If the model gave us something structurally broken, fall back to a
-            // synthetic but compilable test suite instead of failing the whole activity.
+            // If the model gave us something structurally broken, fail validation so the
+            // caller can retry generation instead of silently downgrading to no-op tests.
             if (invalidStructure) {
-                testSuite = this.buildDefaultTestSuite(className);
+                throw new Error(`Invalid or incomplete test suite structure for problem "${title}".`);
             }
             const constraints = typeof pRaw.constraints === "string" && pRaw.constraints.trim()
                 ? pRaw.constraints
@@ -148,25 +148,11 @@ class ProblemAgent {
                 sampleOutputs,
             };
         });
-        // If the model returned fewer than expectedCount, pad by cloning
-        // existing normalized problems so the caller always receives exactly
-        // expectedCount problems.
-        if (problems.length < expectedCount) {
-            const padded = [...problems];
-            let i = 0;
-            while (padded.length < expectedCount && problems.length > 0) {
-                const base = problems[i % problems.length];
-                padded.push({
-                    ...base,
-                    id: `${base.id}-copy-${padded.length + 1}`,
-                    title: `${base.title} (Variant ${padded.length + 1 - problems.length})`,
-                });
-                i++;
-            }
-            problems = padded;
-        }
-        else if (problems.length > expectedCount) {
-            problems = problems.slice(0, expectedCount);
+        // Require that the model returns exactly the requested number of problems so
+        // the caller can decide whether to retry generation instead of padding with
+        // cloned problems.
+        if (problems.length !== expectedCount) {
+            throw new Error(`Expected ${expectedCount} problems but received ${problems.length} from agent response.`);
         }
         return problems;
     }
@@ -224,55 +210,6 @@ class ProblemAgent {
     }
     buildDefaultClassSkeleton(className) {
         return `public class ${className} {\n\n    // TODO: implement solution\n\n}\n`;
-    }
-    buildDefaultTestSuite(className) {
-        return `
-import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.*;
-
-public class ${className}Test {
-
-    @Test
-    void test1() {
-        assertTrue(true);
-    }
-
-    @Test
-    void test2() {
-        assertTrue(true);
-    }
-
-    @Test
-    void test3() {
-        assertTrue(true);
-    }
-
-    @Test
-    void test4() {
-        assertTrue(true);
-    }
-
-    @Test
-    void test5() {
-        assertTrue(true);
-    }
-
-    @Test
-    void test6() {
-        assertTrue(true);
-    }
-
-    @Test
-    void test7() {
-        assertTrue(true);
-    }
-
-    @Test
-    void test8() {
-        assertTrue(true);
-    }
-}
-`.trimStart();
     }
 }
 exports.ProblemAgent = ProblemAgent;
