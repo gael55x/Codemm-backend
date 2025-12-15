@@ -14,6 +14,5 @@ export declare class ProblemAgent {
     private parseAndValidate;
     private tryParseJson;
     private buildDefaultClassSkeleton;
-    private buildDefaultTestSuite;
 }
 //# sourceMappingURL=agent.d.ts.map
