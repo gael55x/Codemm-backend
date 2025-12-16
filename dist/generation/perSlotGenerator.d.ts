@@ -1,7 +1,7 @@
 import { type GeneratedProblemDraft } from "../contracts/problem";
 import type { ProblemSlot } from "../planner/types";
 /**
- * Generate a single problem for the given slot via one Anthropic LLM call.
+ * Generate a single problem for the given slot via one Codex LLM call.
  *
  * Returns GeneratedProblemDraft (includes reference_solution).
  * Validates JSON shape and test suite structure.

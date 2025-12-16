@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { getAnthropicClient } from "../infra/llm/anthropic";
+import { createCodexCompletion } from "../infra/llm/codex";
 import { tryParseJson } from "../utils/jsonParser";
 import { buildDefaultClassSkeleton, inferClassName } from "../utils/javaCodegen";
 import { isValidJUnit5TestSuite } from "../contracts/javaRules";
@@ -7,10 +7,12 @@ import { GeneratedProblemDraftSchema, type GeneratedProblemDraft } from "../cont
 import type { ProblemSlot } from "../planner/types";
 import { buildSlotPrompt, V1_PROBLEM_GENERATOR_SYSTEM_PROMPT } from "./prompts";
 
-const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-haiku-4-5-20251001";
+const CODEX_MODEL = process.env.CODEX_MODEL ?? "gpt-4.1";
+const MAX_TOKENS = 5000;
+const TEMPERATURE = 0.3;
 
 /**
- * Generate a single problem for the given slot via one Anthropic LLM call.
+ * Generate a single problem for the given slot via one Codex LLM call.
  *
  * Returns GeneratedProblemDraft (includes reference_solution).
  * Validates JSON shape and test suite structure.
@@ -20,20 +22,14 @@ const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-haiku-4-5-20251001";
  * Throws on any validation failure.
  */
 export async function generateSingleProblem(slot: ProblemSlot): Promise<GeneratedProblemDraft> {
-  const anthropic = getAnthropicClient();
   const prompt = buildSlotPrompt(slot);
 
-  const completion = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 5000,
-    temperature: 0.3,
+  const completion = await createCodexCompletion({
     system: V1_PROBLEM_GENERATOR_SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
+    user: prompt,
+    model: CODEX_MODEL,
+    temperature: TEMPERATURE,
+    maxTokens: MAX_TOKENS,
   });
 
   const text = completion.content
