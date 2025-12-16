@@ -10,7 +10,8 @@
 # Requirements:
 #   - Docker installed and running
 #   - Node.js + npm installed
-#   - ANTHROPIC_API_KEY set in Codem-backend/.env (or in your shell env)
+#   - CODEX_API_KEY set in Codem-backend/.env (or in your shell env)
+#   - Optional: CODEX_MODEL (default gpt-4.1), CODEX_BASE_URL for self-hosted Codex
 
 set -euo pipefail
 
@@ -45,4 +46,3 @@ echo "Press Ctrl+C to stop."
 echo
 
 npm start
-

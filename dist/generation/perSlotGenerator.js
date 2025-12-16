@@ -5,15 +5,17 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateSingleProblem = generateSingleProblem;
 const crypto_1 = __importDefault(require("crypto"));
-const anthropic_1 = require("../infra/llm/anthropic");
+const codex_1 = require("../infra/llm/codex");
 const jsonParser_1 = require("../utils/jsonParser");
 const javaCodegen_1 = require("../utils/javaCodegen");
 const javaRules_1 = require("../contracts/javaRules");
 const problem_1 = require("../contracts/problem");
 const prompts_1 = require("./prompts");
-const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-haiku-4-5-20251001";
+const CODEX_MODEL = process.env.CODEX_MODEL ?? "gpt-4.1";
+const MAX_TOKENS = 5000;
+const TEMPERATURE = 0.3;
 /**
- * Generate a single problem for the given slot via one Anthropic LLM call.
+ * Generate a single problem for the given slot via one Codex LLM call.
  *
  * Returns GeneratedProblemDraft (includes reference_solution).
  * Validates JSON shape and test suite structure.
@@ -23,19 +25,13 @@ const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-haiku-4-5-20251001";
  * Throws on any validation failure.
  */
 async function generateSingleProblem(slot) {
-    const anthropic = (0, anthropic_1.getAnthropicClient)();
     const prompt = (0, prompts_1.buildSlotPrompt)(slot);
-    const completion = await anthropic.messages.create({
-        model: CLAUDE_MODEL,
-        max_tokens: 5000,
-        temperature: 0.3,
+    const completion = await (0, codex_1.createCodexCompletion)({
         system: prompts_1.V1_PROBLEM_GENERATOR_SYSTEM_PROMPT,
-        messages: [
-            {
-                role: "user",
-                content: prompt,
-            },
-        ],
+        user: prompt,
+        model: CODEX_MODEL,
+        temperature: TEMPERATURE,
+        maxTokens: MAX_TOKENS,
     });
     const text = completion.content
         .map((block) => (block.type === "text" ? block.text : ""))
