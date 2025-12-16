@@ -29,7 +29,15 @@ fi
 
 # 2) Ensure the codem-java-judge Docker image exists
 echo "[2/3] Checking codem-java-judge Docker image..."
-if ! docker image inspect codem-java-judge:latest >/dev/null 2>&1; then
+if [[ "${REBUILD_JUDGE:-0}" == "1" ]]; then
+  echo "REBUILD_JUDGE=1 set. Removing running containers and rebuilding codem-java-judge..."
+  RUNNING_CONTAINERS=$(docker ps -aq --filter ancestor=codem-java-judge)
+  if [[ -n "${RUNNING_CONTAINERS}" ]]; then
+    docker rm -f ${RUNNING_CONTAINERS}
+  fi
+  docker image rm -f codem-java-judge:latest >/dev/null 2>&1 || true
+  docker build -f Dockerfile.java-judge -t codem-java-judge .
+elif ! docker image inspect codem-java-judge:latest >/dev/null 2>&1; then
   echo "codem-java-judge image not found. Building from Dockerfile.java-judge..."
   docker build -f Dockerfile.java-judge -t codem-java-judge .
 else
