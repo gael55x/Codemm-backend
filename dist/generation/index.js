@@ -31,11 +31,14 @@ async function generateProblemsFromPlan(plan) {
         let problem = null;
         let attempts = 0;
         let lastError = null;
+        let lastDraft = null;
+        let repair;
         while (!problem && attempts < maxAttempts) {
             attempts++;
             try {
                 // Step 1: Generate single problem via LLM (includes reference_solution)
-                const draft = await (0, perSlotGenerator_1.generateSingleProblem)(slot);
+                const draft = await (0, perSlotGenerator_1.generateSingleProblem)(slot, repair ? { repair } : undefined);
+                lastDraft = draft;
                 // Step 2: Validate reference_solution compiles and passes tests (Docker)
                 await (0, referenceSolutionValidator_1.validateReferenceSolution)(draft);
                 // Step 3: Discard reference_solution (CRITICAL: do not persist)
@@ -44,6 +47,16 @@ async function generateProblemsFromPlan(plan) {
             catch (err) {
                 lastError = err;
                 console.warn(`Slot ${slot.index} generation attempt ${attempts}/${maxAttempts} failed:`, err.message);
+                if (err instanceof referenceSolutionValidator_1.ReferenceSolutionValidationError && lastDraft) {
+                    repair = {
+                        previousDraft: lastDraft,
+                        judgeStdout: err.judgeStdout,
+                        judgeStderr: err.judgeStderr,
+                    };
+                }
+                else {
+                    repair = undefined;
+                }
                 if (attempts >= maxAttempts) {
                     throw new Error(`Failed to generate slot ${slot.index} after ${maxAttempts} attempts. Last error: ${err.message}`);
                 }

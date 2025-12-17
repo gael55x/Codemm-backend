@@ -12,10 +12,8 @@ function execAsync(command, cwd) {
             timeout: 2000,
             maxBuffer: 256 * 1024,
         }, (error, stdout, stderr) => {
-            if (error) {
-                return reject({ error, stdout, stderr });
-            }
-            resolve({ stdout, stderr });
+            const exitCode = error && typeof error.code === "number" ? error.code : error ? 1 : 0;
+            resolve({ stdout, stderr, exitCode });
         });
     });
 }
@@ -38,11 +36,11 @@ async function runJudge(userCode, testSuite) {
             `-v ${tmp}:/workspace`,
             "codem-java-judge",
         ].join(" ");
-        const { stdout, stderr } = await execAsync(dockerCmd, tmp);
+        const { stdout, stderr, exitCode } = await execAsync(dockerCmd, tmp);
         const executionTimeMs = Date.now() - start;
         // TODO: parse stdout/stderr to determine passed/failed test names.
         return {
-            success: !stderr,
+            success: exitCode === 0,
             passedTests: [],
             failedTests: [],
             stdout,
@@ -56,8 +54,8 @@ async function runJudge(userCode, testSuite) {
             success: false,
             passedTests: [],
             failedTests: [],
-            stdout: e.stdout ?? "",
-            stderr: e.stderr ?? String(e.error ?? e),
+            stdout: e?.stdout ?? "",
+            stderr: e?.stderr ?? String(e?.error ?? e),
             executionTimeMs,
         };
     }
