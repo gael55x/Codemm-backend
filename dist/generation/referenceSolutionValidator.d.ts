@@ -1,4 +1,12 @@
 import type { GeneratedProblemDraft } from "../contracts/problem";
+export declare class ReferenceSolutionValidationError extends Error {
+    judgeStdout: string;
+    judgeStderr: string;
+    constructor(message: string, opts: {
+        stdout: string;
+        stderr: string;
+    });
+}
 /**
  * Validate that the reference_solution compiles and passes all tests via Docker.
  *

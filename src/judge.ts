@@ -4,7 +4,10 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { JudgeResult } from "./types";
 
-function execAsync(command: string, cwd: string): Promise<{ stdout: string; stderr: string }> {
+function execAsync(
+  command: string,
+  cwd: string
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve, reject) => {
     exec(
       command,
@@ -14,10 +17,9 @@ function execAsync(command: string, cwd: string): Promise<{ stdout: string; stde
         maxBuffer: 256 * 1024,
       },
       (error, stdout, stderr) => {
-        if (error) {
-          return reject({ error, stdout, stderr });
-        }
-        resolve({ stdout, stderr });
+        const exitCode =
+          error && typeof (error as any).code === "number" ? (error as any).code : error ? 1 : 0;
+        resolve({ stdout, stderr, exitCode });
       }
     );
   });
@@ -47,13 +49,13 @@ export async function runJudge(userCode: string, testSuite: string): Promise<Jud
       "codem-java-judge",
     ].join(" ");
 
-    const { stdout, stderr } = await execAsync(dockerCmd, tmp);
+    const { stdout, stderr, exitCode } = await execAsync(dockerCmd, tmp);
 
     const executionTimeMs = Date.now() - start;
 
     // TODO: parse stdout/stderr to determine passed/failed test names.
     return {
-      success: !stderr,
+      success: exitCode === 0,
       passedTests: [],
       failedTests: [],
       stdout,
@@ -66,13 +68,12 @@ export async function runJudge(userCode: string, testSuite: string): Promise<Jud
       success: false,
       passedTests: [],
       failedTests: [],
-      stdout: e.stdout ?? "",
-      stderr: e.stderr ?? String(e.error ?? e),
+      stdout: e?.stdout ?? "",
+      stderr: e?.stderr ?? String(e?.error ?? e),
       executionTimeMs,
     };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 }
-
 

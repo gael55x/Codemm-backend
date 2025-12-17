@@ -1,6 +1,18 @@
 import { runJudge } from "../judge";
 import type { GeneratedProblemDraft } from "../contracts/problem";
 
+export class ReferenceSolutionValidationError extends Error {
+  judgeStdout: string;
+  judgeStderr: string;
+
+  constructor(message: string, opts: { stdout: string; stderr: string }) {
+    super(message);
+    this.name = "ReferenceSolutionValidationError";
+    this.judgeStdout = opts.stdout;
+    this.judgeStderr = opts.stderr;
+  }
+}
+
 /**
  * Validate that the reference_solution compiles and passes all tests via Docker.
  *
@@ -16,16 +28,19 @@ import type { GeneratedProblemDraft } from "../contracts/problem";
 export async function validateReferenceSolution(draft: GeneratedProblemDraft): Promise<void> {
   const result = await runJudge(draft.reference_solution, draft.test_suite);
 
+  const stdoutLower = (result.stdout || "").toLowerCase();
   const stderrLower = (result.stderr || "").toLowerCase();
+  const combinedLower = `${stdoutLower}\n${stderrLower}`;
 
   // Check for compile errors
-  const hasCompileError = /\berror:|cannot find symbol|class, interface, or enum expected/.test(
-    stderrLower
-  );
+  const hasCompileError =
+    /\berror:|cannot find symbol|class, interface, or enum expected/.test(combinedLower);
 
   if (hasCompileError) {
-    throw new Error(
-      `Reference solution failed to compile for "${draft.title}": ${result.stderr.slice(0, 400)}`
+    const snippet = `${result.stderr || result.stdout || ""}`.slice(0, 1200);
+    throw new ReferenceSolutionValidationError(
+      `Reference solution failed to compile for "${draft.title}": ${snippet}`,
+      { stdout: result.stdout, stderr: result.stderr }
     );
   }
 
@@ -33,8 +48,10 @@ export async function validateReferenceSolution(draft: GeneratedProblemDraft): P
   // Note: judge.ts currently sets success: !stderr, which may be fragile.
   // For now, accept success === true as "tests passed".
   if (!result.success) {
-    throw new Error(
-      `Reference solution failed tests for "${draft.title}": ${result.stderr.slice(0, 400)}`
+    const snippet = `${result.stderr || result.stdout || ""}`.slice(0, 1200);
+    throw new ReferenceSolutionValidationError(
+      `Reference solution failed tests for "${draft.title}": ${snippet}`,
+      { stdout: result.stdout, stderr: result.stderr }
     );
   }
 

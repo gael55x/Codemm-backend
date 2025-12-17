@@ -1,7 +1,10 @@
 import type { ProblemPlan } from "../planner/types";
 import type { GeneratedProblem, GeneratedProblemDraft } from "../contracts/problem";
 import { generateSingleProblem } from "./perSlotGenerator";
-import { validateReferenceSolution } from "./referenceSolutionValidator";
+import {
+  ReferenceSolutionValidationError,
+  validateReferenceSolution,
+} from "./referenceSolutionValidator";
 
 /**
  * Discard reference_solution from GeneratedProblemDraft to produce GeneratedProblem.
@@ -33,12 +36,17 @@ export async function generateProblemsFromPlan(plan: ProblemPlan): Promise<Gener
     let problem: GeneratedProblem | null = null;
     let attempts = 0;
     let lastError: Error | null = null;
+    let lastDraft: GeneratedProblemDraft | null = null;
+    let repair:
+      | { previousDraft: GeneratedProblemDraft; judgeStdout?: string; judgeStderr?: string }
+      | undefined;
 
     while (!problem && attempts < maxAttempts) {
       attempts++;
       try {
         // Step 1: Generate single problem via LLM (includes reference_solution)
-        const draft: GeneratedProblemDraft = await generateSingleProblem(slot);
+        const draft: GeneratedProblemDraft = await generateSingleProblem(slot, repair ? { repair } : undefined);
+        lastDraft = draft;
 
         // Step 2: Validate reference_solution compiles and passes tests (Docker)
         await validateReferenceSolution(draft);
@@ -51,6 +59,16 @@ export async function generateProblemsFromPlan(plan: ProblemPlan): Promise<Gener
           `Slot ${slot.index} generation attempt ${attempts}/${maxAttempts} failed:`,
           err.message
         );
+
+        if (err instanceof ReferenceSolutionValidationError && lastDraft) {
+          repair = {
+            previousDraft: lastDraft,
+            judgeStdout: err.judgeStdout,
+            judgeStderr: err.judgeStderr,
+          };
+        } else {
+          repair = undefined;
+        }
 
         if (attempts >= maxAttempts) {
           throw new Error(

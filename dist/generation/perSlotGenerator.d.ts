@@ -1,5 +1,10 @@
 import { type GeneratedProblemDraft } from "../contracts/problem";
 import type { ProblemSlot } from "../planner/types";
+type RepairContext = {
+    previousDraft: GeneratedProblemDraft;
+    judgeStdout?: string;
+    judgeStderr?: string;
+};
 /**
  * Generate a single problem for the given slot via one Codex LLM call.
  *
@@ -10,5 +15,8 @@ import type { ProblemSlot } from "../planner/types";
  *
  * Throws on any validation failure.
  */
-export declare function generateSingleProblem(slot: ProblemSlot): Promise<GeneratedProblemDraft>;
+export declare function generateSingleProblem(slot: ProblemSlot, opts?: {
+    repair?: RepairContext;
+}): Promise<GeneratedProblemDraft>;
+export {};
 //# sourceMappingURL=perSlotGenerator.d.ts.map

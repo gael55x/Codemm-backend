@@ -14,6 +14,32 @@ const prompts_1 = require("./prompts");
 const CODEX_MODEL = process.env.CODEX_MODEL ?? "gpt-4.1";
 const MAX_TOKENS = 5000;
 const TEMPERATURE = 0.3;
+function buildRepairPrompt(slot, repair) {
+    const previousJson = JSON.stringify(repair.previousDraft, null, 2);
+    const stdoutSnippet = (repair.judgeStdout ?? "").slice(0, 1600);
+    const stderrSnippet = (repair.judgeStderr ?? "").slice(0, 1600);
+    return `You previously generated a problem JSON for this slot, but the reference_solution FAILED when executed against the test_suite in Docker/JUnit.
+
+Slot requirements:
+- Difficulty: ${slot.difficulty}
+- Topics: ${slot.topics.join(", ")}
+- Problem style: ${slot.problem_style}
+- Constraints: ${slot.constraints}
+- Java 17, no package declarations
+- test_suite must have exactly 8 @Test methods (JUnit 5)
+
+Failure output (may include the real assertion failure):
+STDOUT:
+${stdoutSnippet || "(empty)"}
+
+STDERR:
+${stderrSnippet || "(empty)"}
+
+Here is your previous JSON (you MUST return corrected JSON with the exact same fields; prefer keeping id/title/description/starter_code/test_suite stable, and fix reference_solution so it passes the test_suite):
+${previousJson}
+
+Return ONLY valid JSON. No markdown. No code fences. No prose.`;
+}
 /**
  * Generate a single problem for the given slot via one Codex LLM call.
  *
@@ -24,8 +50,8 @@ const TEMPERATURE = 0.3;
  *
  * Throws on any validation failure.
  */
-async function generateSingleProblem(slot) {
-    const prompt = (0, prompts_1.buildSlotPrompt)(slot);
+async function generateSingleProblem(slot, opts) {
+    const prompt = opts?.repair ? buildRepairPrompt(slot, opts.repair) : (0, prompts_1.buildSlotPrompt)(slot);
     const completion = await (0, codex_1.createCodexCompletion)({
         system: prompts_1.V1_PROBLEM_GENERATOR_SYSTEM_PROMPT,
         user: prompt,
