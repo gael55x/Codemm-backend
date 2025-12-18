@@ -5,7 +5,13 @@ import { join } from "path";
 import { JudgeResult } from "./types";
 import { trace } from "./utils/trace";
 
-const JUDGE_TIMEOUT_MS = Number.parseInt(process.env.JUDGE_TIMEOUT_MS ?? "8000", 10);
+function getJudgeTimeoutMs(): number {
+  const raw = process.env.JUDGE_TIMEOUT_MS;
+  if (!raw) return 15000;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 15000;
+  return Math.min(Math.floor(n), 30_000);
+}
 
 function stripAnsi(text: string): string {
   return text.replace(/\u001b\[[0-9;]*m/g, "");
@@ -43,8 +49,8 @@ function execAsync(
       command,
       {
         cwd,
-        timeout: Number.isFinite(JUDGE_TIMEOUT_MS) ? JUDGE_TIMEOUT_MS : 8000,
-        maxBuffer: 256 * 1024,
+        timeout: getJudgeTimeoutMs(),
+        maxBuffer: 1024 * 1024,
       },
       (error, stdout, stderr) => {
         const exitCode =
