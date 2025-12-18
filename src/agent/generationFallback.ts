@@ -1,5 +1,5 @@
 import type { ActivitySpec } from "../contracts/activitySpec";
-import type { JsonPatchOp } from "../specBuilder/patch";
+import type { JsonPatchOp } from "../compiler/jsonPatch";
 
 export type GenerationFallbackDecision = {
   patch: JsonPatchOp[];
@@ -78,4 +78,3 @@ export function proposeGenerationFallback(spec: ActivitySpec): GenerationFallbac
 
   return null;
 }
-

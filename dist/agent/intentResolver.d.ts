@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { type JsonPatchOp } from "../specBuilder/patch";
-import { type SpecDraft } from "../specBuilder/validators";
+import { type JsonPatchOp } from "../compiler/jsonPatch";
+import { type SpecDraft } from "../compiler/specDraft";
 export type IntentResolutionResult = {
     kind: "patch";
     patch: JsonPatchOp[];

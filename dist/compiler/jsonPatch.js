@@ -30,4 +30,4 @@ function applyJsonPatch(obj, patch) {
     }
     return next;
 }
-//# sourceMappingURL=patch.js.map
+//# sourceMappingURL=jsonPatch.js.map

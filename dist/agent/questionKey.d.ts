@@ -1,4 +1,4 @@
-import type { SpecDraft } from "../specBuilder/validators";
+import type { SpecDraft } from "../compiler/specDraft";
 import { type ConfidenceMap } from "./readiness";
 /**
  * Stable identifier for "what question are we currently trying to answer?"

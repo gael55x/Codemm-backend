@@ -1,14 +1,14 @@
 import crypto from "crypto";
 import { sessionDb, sessionMessageDb, activityDb, sessionCollectorDb } from "../database";
 import { canTransition, type SessionState } from "../contracts/session";
-import { applyJsonPatch, type JsonPatchOp } from "../specBuilder/patch";
+import { applyJsonPatch, type JsonPatchOp } from "../compiler/jsonPatch";
 import { ActivitySpecSchema, type ActivitySpec } from "../contracts/activitySpec";
 import { isLanguageSupportedForGeneration } from "../languages/profiles";
 import { deriveProblemPlan } from "../planner";
 import { generateProblemsFromPlan } from "../generation";
 import type { GeneratedProblem } from "../contracts/problem";
-import type { SpecDraft } from "../specBuilder/validators";
-import { ensureFixedFields } from "../specBuilder/validators";
+import type { SpecDraft } from "../compiler/specDraft";
+import { ensureFixedFields } from "../compiler/specDraft";
 import { trace, traceText } from "../utils/trace";
 import { resolveIntentWithLLM } from "../agent/intentResolver";
 import type { IntentResolutionOutput } from "../agent/intentResolver";

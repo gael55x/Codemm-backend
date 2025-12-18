@@ -1,5 +1,5 @@
 import type { ActivitySpec } from "../contracts/activitySpec";
-import type { SpecDraft } from "../specBuilder/validators";
+import type { SpecDraft } from "../compiler/specDraft";
 import { computeReadiness, type ConfidenceMap } from "./readiness";
 
 const MISSING_PRIORITY: (keyof ActivitySpec)[] = [
@@ -35,4 +35,3 @@ export function getDynamicQuestionKey(
 
   return null;
 }
-

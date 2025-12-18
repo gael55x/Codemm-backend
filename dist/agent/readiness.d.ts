@@ -1,5 +1,5 @@
 import type { ActivitySpec } from "../contracts/activitySpec";
-import type { SpecDraft } from "../specBuilder/validators";
+import type { SpecDraft } from "../compiler/specDraft";
 import { analyzeSpecGaps } from "./specAnalysis";
 export type ConfidenceMap = Record<string, number>;
 export declare const REQUIRED_CONFIDENCE: Partial<Record<keyof ActivitySpec, number>>;

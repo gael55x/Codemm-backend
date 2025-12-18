@@ -1,5 +1,5 @@
 import type { ActivitySpec } from "../contracts/activitySpec";
-import type { SpecDraft } from "../specBuilder/validators";
+import type { SpecDraft } from "../compiler/specDraft";
 import type { ConfidenceMap, ReadinessResult } from "./readiness";
 import { listAgentSelectableLanguages } from "../languages/profiles";
 
