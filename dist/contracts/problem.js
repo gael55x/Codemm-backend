@@ -3,6 +3,26 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.GeneratedProblemSchema = exports.GeneratedProblemDraftSchema = exports.WorkspaceSchema = exports.WorkspaceFileSchema = void 0;
 const zod_1 = require("zod");
 const javaRules_1 = require("./javaRules");
+function stripJavaComments(source) {
+    const withoutBlockComments = source.replace(/\/\*[\s\S]*?\*\//g, "");
+    return withoutBlockComments.replace(/\/\/.*$/gm, "");
+}
+function hasJavaMainMethod(source) {
+    const s = stripJavaComments(source);
+    return /public\s+static\s+void\s+main\s*\(\s*(?:final\s+)?String\s*(?:(?:\[\s*\]|\.\.\.)\s*\w+|\w+\s*\[\s*\])\s*\)/.test(s);
+}
+function testSuiteReferencesClass(testSuite, className) {
+    const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Conservative: only flag real type references, not incidental prose.
+    const patterns = [
+        new RegExp(`\\bnew\\s+${escaped}\\b`),
+        new RegExp(`\\b${escaped}\\s*\\.`),
+        new RegExp(`\\b${escaped}\\s*\\(`),
+        new RegExp(`\\bextends\\s+${escaped}\\b`),
+        new RegExp(`\\bimplements\\s+${escaped}\\b`),
+    ];
+    return patterns.some((re) => re.test(testSuite));
+}
 /**
  * Codemm v1.0 Generation output contract for Java problems.
  *
@@ -53,24 +73,87 @@ exports.WorkspaceSchema = zod_1.z
     // For Java: the class name to run via `java <entrypoint>`. Optional for test-only workspaces.
     entrypoint: zod_1.z.string().trim().min(1).max(120).optional(),
 })
-    .strict();
+    .strict()
+    .superRefine((ws, ctx) => {
+    const paths = new Set();
+    for (const f of ws.files) {
+        if (paths.has(f.path)) {
+            ctx.addIssue({
+                code: zod_1.z.ZodIssueCode.custom,
+                message: `Duplicate workspace file path "${f.path}".`,
+                path: ["files"],
+            });
+        }
+        paths.add(f.path);
+    }
+    const entryFiles = ws.files.filter((f) => f.role === "entry");
+    if (entryFiles.length !== 1) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: `workspace.files must include exactly 1 entry file (found ${entryFiles.length}).`,
+            path: ["files"],
+        });
+        return;
+    }
+    const entryFile = entryFiles[0];
+    if (!hasJavaMainMethod(entryFile.content)) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: `Entry file "${entryFile.path}" must include public static void main(String[] args).`,
+            path: ["files"],
+        });
+    }
+    const entryClassFromFilename = entryFile.path.replace(/\.java$/i, "");
+    const entrypoint = ws.entrypoint?.trim();
+    if (!entrypoint) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: `workspace.entrypoint is required when using workspace problems (expected "${entryClassFromFilename}").`,
+            path: ["entrypoint"],
+        });
+        return;
+    }
+    // Ensure the entrypoint maps cleanly to a class defined in the entry file.
+    const escaped = entrypoint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const content = stripJavaComments(entryFile.content);
+    if (!new RegExp(`\\bclass\\s+${escaped}\\b`).test(content)) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: `Entry file "${entryFile.path}" must declare class "${entrypoint}".`,
+            path: ["files"],
+        });
+    }
+});
 const LegacyDraftSchema = CommonProblemFieldsSchema.extend({
     // Starter code the learner edits.
     starter_code: javaRules_1.JavaSourceNoPackageSchema,
     // Hidden solution used ONLY for validation.
     reference_solution: javaRules_1.JavaSourceNoPackageSchema,
 }).strict();
-const WorkspaceDraftSchema = CommonProblemFieldsSchema.extend({
+function refineWorkspaceProblem(draft, ctx) {
+    const entrypoint = draft.workspace.entrypoint?.trim();
+    if (!entrypoint)
+        return;
+    if (testSuiteReferencesClass(draft.test_suite, entrypoint)) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: `test_suite must not reference the entry class "${entrypoint}". Tests must target a non-entry class.`,
+            path: ["test_suite"],
+        });
+    }
+}
+const WorkspaceDraftSchemaBase = CommonProblemFieldsSchema.extend({
     workspace: exports.WorkspaceSchema,
     // Hidden solution workspace used ONLY for validation.
     reference_workspace: exports.WorkspaceSchema,
 }).strict();
+const WorkspaceDraftSchema = WorkspaceDraftSchemaBase.superRefine(refineWorkspaceProblem);
 exports.GeneratedProblemDraftSchema = zod_1.z.union([LegacyDraftSchema, WorkspaceDraftSchema]);
 /**
  * Persisted problem shape (reference_solution intentionally omitted).
  */
 exports.GeneratedProblemSchema = zod_1.z.union([
     LegacyDraftSchema.omit({ reference_solution: true }),
-    WorkspaceDraftSchema.omit({ reference_workspace: true }),
+    WorkspaceDraftSchemaBase.omit({ reference_workspace: true }).superRefine(refineWorkspaceProblem),
 ]);
 //# sourceMappingURL=problem.js.map

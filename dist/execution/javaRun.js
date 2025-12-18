@@ -21,6 +21,13 @@ function execAsync(command, cwd) {
         });
     });
 }
+function assertSafeJavaMainClassName(mainClass) {
+    const trimmed = mainClass.trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) {
+        throw new Error(`Invalid mainClass "${mainClass}".`);
+    }
+    return trimmed;
+}
 function hasJavaMainMethod(source) {
     const withoutBlockComments = source.replace(/\/\*[\s\S]*?\*\//g, "");
     const withoutLineComments = withoutBlockComments.replace(/\/\/.*$/gm, "");
@@ -41,20 +48,26 @@ async function runJavaFiles(opts) {
         for (const [filename, source] of Object.entries(opts.files)) {
             (0, fs_1.writeFileSync)((0, path_1.join)(tmp, filename), source, "utf8");
         }
-        const mainClass = opts.mainClass ?? inferMainClassFromFiles(opts.files);
+        const inferred = opts.mainClass ?? inferMainClassFromFiles(opts.files);
+        const mainClass = inferred ? assertSafeJavaMainClassName(inferred) : null;
         if (!mainClass) {
             return {
                 stdout: "",
                 stderr: "No runnable Java entrypoint found. Add `public static void main(String[] args)` to a class, or specify mainClass.",
             };
         }
+        const hasStdin = typeof opts.stdin === "string";
+        if (hasStdin) {
+            (0, fs_1.writeFileSync)((0, path_1.join)(tmp, "stdin.txt"), opts.stdin ?? "", "utf8");
+        }
+        const runCmd = hasStdin ? `java ${mainClass} < stdin.txt` : `java ${mainClass}`;
         // Reuse the existing judge image, but override ENTRYPOINT so it doesn't run JUnit.
         const dockerCmd = [
             "docker run --rm",
             `-v ${tmp}:/workspace`,
             "--entrypoint /bin/bash",
             "codem-java-judge",
-            `-lc "javac *.java && java ${mainClass}"`,
+            `-lc "javac *.java && ${runCmd}"`,
         ].join(" ");
         const { stdout, stderr } = await execAsync(dockerCmd, tmp);
         return { stdout, stderr };
@@ -76,8 +89,15 @@ async function runJavaFiles(opts) {
  * - No persistence
  * - Uses the existing codem-java-judge image but overrides entrypoint
  */
-async function runJavaCodeOnly(userCode) {
+async function runJavaCodeOnly(userCode, stdin) {
     const userClassName = (0, javaCodegen_1.inferClassName)(userCode, "Solution");
-    return runJavaFiles({ files: { [`${userClassName}.java`]: userCode }, mainClass: userClassName });
+    const opts = {
+        files: { [`${userClassName}.java`]: userCode },
+        mainClass: userClassName,
+    };
+    if (typeof stdin === "string") {
+        opts.stdin = stdin;
+    }
+    return runJavaFiles(opts);
 }
 //# sourceMappingURL=javaRun.js.map

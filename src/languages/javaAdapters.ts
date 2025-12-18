@@ -5,13 +5,18 @@ import { runJudge, runJudgeFiles } from "../judge";
 export const javaExecutionAdapter: ExecutionAdapter = {
   run: async (req) => {
     if (req.kind === "files") {
-      const opts: { files: Record<string, string>; mainClass?: string } = { files: req.files };
+      const opts: { files: Record<string, string>; mainClass?: string; stdin?: string } = {
+        files: req.files,
+      };
       if (typeof req.mainClass === "string" && req.mainClass.trim()) {
         opts.mainClass = req.mainClass.trim();
       }
+      if (typeof req.stdin === "string") {
+        opts.stdin = req.stdin;
+      }
       return runJavaFiles(opts);
     }
-    return runJavaCodeOnly(req.code);
+    return runJavaCodeOnly(req.code, req.stdin);
   },
 };
 
