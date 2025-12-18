@@ -7,6 +7,33 @@ import { trace } from "./utils/trace";
 
 const JUDGE_TIMEOUT_MS = Number.parseInt(process.env.JUDGE_TIMEOUT_MS ?? "8000", 10);
 
+function stripAnsi(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*m/g, "");
+}
+
+function parseJUnitTree(stdout: string): { passed: string[]; failed: string[] } {
+  const clean = stripAnsi(stdout);
+  const passed: string[] = [];
+  const failed: string[] = [];
+  const seen = new Set<string>();
+
+  for (const line of clean.split(/\r?\n/)) {
+    // Example:
+    // |   +-- testNamesWithNumbers() [OK]
+    // |   +-- testNamesWithSpaces() [X] expected: <...>
+    const m = line.match(/\b([A-Za-z_][A-Za-z0-9_]*)\(\)\s+\[(OK|X)\]\b/);
+    if (!m) continue;
+    const name = m[1]!;
+    const status = m[2]!;
+    if (seen.has(`${name}:${status}`)) continue;
+    seen.add(`${name}:${status}`);
+    if (status === "OK") passed.push(name);
+    if (status === "X") failed.push(name);
+  }
+
+  return { passed, failed };
+}
+
 function execAsync(
   command: string,
   cwd: string
@@ -66,11 +93,11 @@ export async function runJudge(userCode: string, testSuite: string): Promise<Jud
 
     const executionTimeMs = Date.now() - start;
 
-    // TODO: parse stdout/stderr to determine passed/failed test names.
+    const { passed, failed } = parseJUnitTree(stdout);
     return {
       success: exitCode === 0,
-      passedTests: [],
-      failedTests: [],
+      passedTests: passed,
+      failedTests: failed,
       stdout,
       stderr,
       executionTimeMs,
@@ -127,10 +154,11 @@ export async function runJudgeFiles(userFiles: JavaFiles, testSuite: string): Pr
     trace("judge.result", { exitCode, timedOut, stdoutLen: stdout.length, stderrLen: stderr.length });
 
     const executionTimeMs = Date.now() - start;
+    const { passed, failed } = parseJUnitTree(stdout);
     return {
       success: exitCode === 0,
-      passedTests: [],
-      failedTests: [],
+      passedTests: passed,
+      failedTests: failed,
       stdout,
       stderr,
       executionTimeMs,
