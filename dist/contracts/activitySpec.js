@@ -1,11 +1,17 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ActivitySpecSchema = exports.DifficultyPlanSchema = exports.DifficultyPlanItemSchema = exports.DifficultySchema = exports.ActivityLanguageSchema = exports.CODEMM_DEFAULT_CONSTRAINTS = exports.CODEMM_SPEC_VERSION = void 0;
+exports.ActivitySpecSchema = exports.DifficultyPlanSchema = exports.DifficultyPlanItemSchema = exports.DifficultySchema = exports.ActivityLanguageSchema = exports.CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE = exports.CODEMM_DEFAULT_CONSTRAINTS = exports.CODEMM_DEFAULT_TEST_CASE_COUNT = exports.CODEMM_SPEC_VERSION = void 0;
 exports.createEmptyActivitySpec = createEmptyActivitySpec;
 const zod_1 = require("zod");
 exports.CODEMM_SPEC_VERSION = "1.0";
+exports.CODEMM_DEFAULT_TEST_CASE_COUNT = 8;
+// Backwards-compatible name; this is the Java default in Codemm v1.
 exports.CODEMM_DEFAULT_CONSTRAINTS = "Java 17, JUnit 5, no package declarations.";
-exports.ActivityLanguageSchema = zod_1.z.enum(["java"]);
+exports.CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE = {
+    java: exports.CODEMM_DEFAULT_CONSTRAINTS,
+    python: "Python 3.11, pytest, no external libraries.",
+};
+exports.ActivityLanguageSchema = zod_1.z.enum(["java", "python"]);
 exports.DifficultySchema = zod_1.z.enum(["easy", "medium", "hard"]);
 exports.DifficultyPlanItemSchema = zod_1.z
     .object({
@@ -46,7 +52,7 @@ exports.ActivitySpecSchema = zod_1.z
     problem_style: zod_1.z.string().trim().min(1).max(64),
     constraints: zod_1.z.string().trim().min(1).max(2000),
     // Must be exactly 8 (Codemm v1.0 rule)
-    test_case_count: zod_1.z.literal(8),
+    test_case_count: zod_1.z.literal(exports.CODEMM_DEFAULT_TEST_CASE_COUNT),
 })
     .strict()
     .superRefine((spec, ctx) => {
@@ -58,7 +64,15 @@ exports.ActivitySpecSchema = zod_1.z
             message: `difficulty_plan counts must sum to problem_count (${spec.problem_count}). Got ${planSum}.`,
         });
     }
-    // Java-only for now; enforce that constraints remind about packages/tests.
+    const expectedConstraints = exports.CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE[spec.language];
+    if (spec.constraints !== expectedConstraints) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            path: ["constraints"],
+            message: `constraints must be exactly "${expectedConstraints}" for language "${spec.language}".`,
+        });
+    }
+    // Java-only invariants enforced via constraints.
     if (spec.language === "java") {
         const c = spec.constraints.toLowerCase();
         const mentionsNoPackage = c.includes("no package");
@@ -83,8 +97,8 @@ function createEmptyActivitySpec() {
         ],
         topic_tags: ["oop"],
         problem_style: "stdout",
-        constraints: exports.CODEMM_DEFAULT_CONSTRAINTS,
-        test_case_count: 8,
+        constraints: exports.CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE.java,
+        test_case_count: exports.CODEMM_DEFAULT_TEST_CASE_COUNT,
     };
 }
 //# sourceMappingURL=activitySpec.js.map

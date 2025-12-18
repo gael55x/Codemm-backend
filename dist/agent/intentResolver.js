@@ -8,8 +8,10 @@ const jsonParser_1 = require("../utils/jsonParser");
 const trace_1 = require("../utils/trace");
 const patch_1 = require("../specBuilder/patch");
 const validators_1 = require("../specBuilder/validators");
+const profiles_1 = require("../languages/profiles");
 const CODEX_MODEL = process.env.CODEX_MODEL ?? "gpt-4.1";
-const SUPPORTED_LANGUAGES = activitySpec_1.ActivityLanguageSchema.options.join(", ");
+const CONTRACT_LANGUAGES = activitySpec_1.ActivityLanguageSchema.options.join(", ");
+const SELECTABLE_LANGUAGES = (0, profiles_1.listAgentSelectableLanguages)().join(", ");
 const IntentResolutionSchema = zod_1.z
     .object({
     inferredPatch: zod_1.z
@@ -47,6 +49,12 @@ const IntentResolutionSchema = zod_1.z
     }
 });
 function buildSystemPrompt() {
+    const languageProfiles = Object.values(profiles_1.LANGUAGE_PROFILES)
+        .map((p) => {
+        const avail = p.support.generation && p.support.judge ? "available" : "not available yet";
+        return `- ${p.language}: runtime=${p.runtime}, tests=${p.testFramework}, constraints="${p.defaultConstraints}" (${avail})`;
+    })
+        .join("\n");
     return `
 You are Codemm's intent resolver.
 
@@ -57,14 +65,19 @@ Your job:
 
 Hard rules:
 - Return ONLY valid JSON (no markdown, no code fences, no prose).
-- Supported languages right now: ${SUPPORTED_LANGUAGES}. Never invent unsupported languages. If user asks for another language, ask a clarification question instead.
+- ActivitySpec contract languages: ${CONTRACT_LANGUAGES}.
+- Product-supported (selectable) languages right now: ${SELECTABLE_LANGUAGES || "java"}.
+- If the user asks for a language that is not selectable yet, ask a clarificationQuestion to switch to a selectable language (do NOT set language to an unavailable value).
 - Do not output constraints or test_case_count; those are system invariants.
 - If your inference is uncertain, either set a low confidence score or ask a clarificationQuestion.
 - Do not "force" a patch that contradicts the user's explicit statement.
 
 Current system invariants (non-negotiable):
-- constraints must be exactly "${activitySpec_1.CODEMM_DEFAULT_CONSTRAINTS}"
-- test_case_count must be 8
+- constraints are language-dependent and must match the active language profile exactly.
+- test_case_count must be ${activitySpec_1.CODEMM_DEFAULT_TEST_CASE_COUNT}
+
+Language profiles:
+${languageProfiles}
 `.trim();
 }
 function buildUserPrompt(args) {
@@ -78,7 +91,7 @@ ${JSON.stringify(args.currentSpec)}
 Output JSON schema:
 {
   "inferredPatch": {
-    "language"?: "java",
+    "language"?: "java" | "python",
     "problem_count"?: number,
     "difficulty_plan"?: [{"difficulty":"easy|medium|hard","count":number}, ...],
     "topic_tags"?: string[],

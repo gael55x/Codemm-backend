@@ -6,7 +6,10 @@ import {
   DifficultyPlanSchema,
   DifficultySchema,
   CODEMM_DEFAULT_CONSTRAINTS,
+  CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE,
+  CODEMM_DEFAULT_TEST_CASE_COUNT,
 } from "../contracts/activitySpec";
+import { isLanguageSupportedForGeneration } from "../languages/profiles";
 import type { JsonPatchOp } from "./patch";
 
 export type SpecDraft = Partial<ActivitySpec> & { version?: "1.0" };
@@ -24,7 +27,7 @@ export const ActivitySpecDraftSchema = z
     topic_tags: z.array(z.string().trim().min(1).max(40)).min(1).max(12).optional(),
     problem_style: z.string().trim().min(1).max(64).optional(),
     constraints: z.string().trim().min(1).max(2000).optional(),
-    test_case_count: z.literal(8).optional(),
+    test_case_count: z.literal(CODEMM_DEFAULT_TEST_CASE_COUNT).optional(),
   })
   .strict()
   .superRefine((spec, ctx) => {
@@ -39,16 +42,13 @@ export const ActivitySpecDraftSchema = z
       }
     }
 
-    if (spec.constraints != null) {
-      const c = spec.constraints.toLowerCase();
-      const mentionsNoPackage = c.includes("no package");
-      const mentionsJunit = c.includes("junit") || c.includes("junit 5");
-      if (!mentionsNoPackage || !mentionsJunit) {
+    if (spec.constraints != null && spec.language != null) {
+      const expected = CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE[spec.language];
+      if (spec.constraints !== expected) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["constraints"],
-          message:
-            "constraints must mention 'no package' and JUnit requirements (e.g. 'JUnit 5').",
+          message: `constraints must be exactly "${expected}" for language "${spec.language}".`,
         });
       }
     }
@@ -76,27 +76,37 @@ function parseIntStrict(s: string): number | null {
 }
 
 export function ensureFixedFields(spec: SpecDraft): JsonPatchOp[] {
-  // Hard rule: test_case_count must be exactly 8.
+  // Hard rule: test_case_count must be exactly 8 (v1).
   const patch: JsonPatchOp[] = [];
-  if (spec.test_case_count !== 8) {
-    patch.push({ op: spec.test_case_count == null ? "add" : "replace", path: "/test_case_count", value: 8 });
+  if (spec.test_case_count !== CODEMM_DEFAULT_TEST_CASE_COUNT) {
+    patch.push({
+      op: spec.test_case_count == null ? "add" : "replace",
+      path: "/test_case_count",
+      value: CODEMM_DEFAULT_TEST_CASE_COUNT,
+    });
   }
   if (spec.version !== "1.0") {
     patch.push({ op: spec.version == null ? "add" : "replace", path: "/version", value: "1.0" });
   }
-  // Hard rule: constraints are invariant for Codemm v1.0.
-  if (spec.constraints !== CODEMM_DEFAULT_CONSTRAINTS) {
+
+  const language = spec.language ?? "java";
+  const expectedConstraints = CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE[language];
+
+  // Hard rule: constraints are invariant for Codemm v1.0 (per language).
+  if (spec.constraints !== expectedConstraints) {
     patch.push({
       op: spec.constraints == null ? "add" : "replace",
       path: "/constraints",
-      value: CODEMM_DEFAULT_CONSTRAINTS,
+      value: expectedConstraints,
     });
   }
   return patch;
 }
 
 export function isSpecComplete(spec: SpecDraft): spec is ActivitySpec {
-  return ActivitySpecSchema.safeParse(spec).success;
+  const res = ActivitySpecSchema.safeParse(spec);
+  if (!res.success) return false;
+  return isLanguageSupportedForGeneration(res.data.language);
 }
 
 export function validatePatchedSpecOrError(patched: SpecDraft): string | null {
@@ -113,7 +123,10 @@ export function buildPatchForLanguage(answer: string): { patch?: JsonPatchOp[]; 
   if (a === "java") {
     return { patch: [{ op: "replace", path: "/language", value: "java" }] };
   }
-  return { error: "Only 'java' is supported right now." };
+  if (a === "python" || a === "py") {
+    return { patch: [{ op: "replace", path: "/language", value: "python" }] };
+  }
+  return { error: "Supported languages: java, python." };
 }
 
 export function buildPatchForProblemCount(answer: string): { patch?: JsonPatchOp[]; error?: string } {

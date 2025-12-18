@@ -1,21 +1,20 @@
 import crypto from "crypto";
 import { sessionDb, sessionMessageDb, activityDb, sessionCollectorDb } from "../database";
 import { canTransition, type SessionState } from "../contracts/session";
-import { getNextQuestion, specBuilderStep, type SpecBuilderResult } from "../specBuilder";
-import { nextSlotKey } from "../specBuilder/intent";
 import { applyJsonPatch, type JsonPatchOp } from "../specBuilder/patch";
 import { ActivitySpecSchema, type ActivitySpec } from "../contracts/activitySpec";
+import { isLanguageSupportedForGeneration } from "../languages/profiles";
 import { deriveProblemPlan } from "../planner";
 import { generateProblemsFromPlan } from "../generation";
 import type { GeneratedProblem } from "../contracts/problem";
 import type { SpecDraft } from "../specBuilder/validators";
-import { ensureFixedFields, isSpecComplete, validatePatchedSpecOrError } from "../specBuilder/validators";
-import { interpretIntent } from "../intentInterpreter";
+import { ensureFixedFields } from "../specBuilder/validators";
 import { trace, traceText } from "../utils/trace";
 import { resolveIntentWithLLM } from "../agent/intentResolver";
 import type { IntentResolutionOutput } from "../agent/intentResolver";
 import { computeReadiness, type ConfidenceMap } from "../agent/readiness";
 import { generateNextPrompt } from "../agent/promptGenerator";
+import { getDynamicQuestionKey } from "../agent/questionKey";
 import { proposeGenerationFallback } from "../agent/generationFallback";
 import { GenerationSlotFailureError } from "../generation/errors";
 
@@ -146,9 +145,12 @@ export function createSession(userId?: number | null): { sessionId: string; stat
   const id = crypto.randomUUID();
   const state: SessionState = "DRAFT";
 
+  const fixed = ensureFixedFields({} as SpecDraft);
+  const initialSpec = fixed.length > 0 ? applyJsonPatch({} as any, fixed) : {};
+
   // Contract allows null or {} — DB column is NOT NULL, so we store {}.
-  sessionDb.create(id, state, "{}", userId ?? null);
-  const initialQuestionKey = nextSlotKey({} as SpecDraft);
+  sessionDb.create(id, state, JSON.stringify(initialSpec), userId ?? null);
+  const initialQuestionKey = getDynamicQuestionKey(initialSpec as SpecDraft, {});
   sessionCollectorDb.upsert(id, initialQuestionKey, []);
 
   return { sessionId: id, state };
@@ -158,8 +160,8 @@ export function getSession(id: string): SessionRecord {
   const s = requireSession(id);
   const messages = sessionMessageDb.findBySessionId(id);
   const spec = parseSpecJson(s.spec_json);
-  const collector = getCollectorState(id, nextSlotKey(spec as SpecDraft));
   const confidence = parseJsonObject(s.confidence_json) as Record<string, number>;
+  const collector = getCollectorState(id, getDynamicQuestionKey(spec as SpecDraft, confidence as any));
   const intentTrace = parseJsonArray(s.intent_trace_json).slice(-50);
 
   return {
@@ -207,162 +209,59 @@ export async function processSessionMessage(
   }
 
   const currentSpec = parseSpecJson(s.spec_json);
-  const currentQuestionKey = nextSlotKey(currentSpec as SpecDraft);
+  const existingConfidence = parseJsonObject(s.confidence_json) as ConfidenceMap;
 
   // Always persist user message.
   sessionMessageDb.create(crypto.randomUUID(), sessionId, "user", message);
 
-  const collector = getCollectorState(sessionId, currentQuestionKey);
-  const updatedBuffer = [...collector.buffer, message];
-  persistCollectorState(sessionId, { currentQuestionKey, buffer: updatedBuffer });
-
-  const combined = updatedBuffer.join(" ").trim();
-  traceText("session.message.combined", combined, { extra: { sessionId, bufferLen: updatedBuffer.length } });
   const fixed = ensureFixedFields(currentSpec as SpecDraft);
   const specWithFixed = fixed.length > 0 ? applyJsonPatch(currentSpec as any, fixed) : currentSpec;
   trace("session.spec.fixed", { sessionId, fixedOps: fixed.map((op) => op.path) });
 
-  // Optional dynamic intent resolver (LLM) — can be enabled without removing the compiler fallback.
-  // This is the first step toward a goal-driven agent loop:
-  // - LLM proposes a safe partial patch + confidence
-  // - We still enforce strict draft validation before applying
-  // - If it can't infer, we fall back to deterministic systems
-  if (process.env.CODEMM_AGENT_MODE === "dynamic") {
-    const existingConfidence = parseJsonObject(s.confidence_json) as ConfidenceMap;
-    const existingTrace = parseJsonArray(s.intent_trace_json);
-    let effectiveConfidence: ConfidenceMap = { ...existingConfidence };
+  const expectedQuestionKey = getDynamicQuestionKey(specWithFixed as SpecDraft, existingConfidence);
+  const collector = getCollectorState(sessionId, expectedQuestionKey);
+  const updatedBuffer = [...collector.buffer, message];
+  persistCollectorState(sessionId, { currentQuestionKey: expectedQuestionKey, buffer: updatedBuffer });
 
-    const resolved = await resolveIntentWithLLM({
+  const combined = updatedBuffer.join(" ").trim();
+  traceText("session.message.combined", combined, { extra: { sessionId, bufferLen: updatedBuffer.length } });
+  const existingTrace = parseJsonArray(s.intent_trace_json);
+  let effectiveConfidence: ConfidenceMap = { ...existingConfidence };
+
+  const resolved = await resolveIntentWithLLM({
+    userMessage: combined,
+    currentSpec: specWithFixed as SpecDraft,
+  }).catch((e) => ({ kind: "error" as const, error: e?.message ?? String(e) }));
+
+  if ("output" in resolved && resolved.output) {
+    const output = resolved.output as IntentResolutionOutput;
+    const nextConfidence = mergeConfidence(existingConfidence, output.confidence ?? {});
+    effectiveConfidence = nextConfidence;
+    const nextTrace = appendIntentTrace(existingTrace, {
+      ts: new Date().toISOString(),
       userMessage: combined,
-      currentSpec: specWithFixed as SpecDraft,
-    }).catch((e) => ({ kind: "error" as const, error: e?.message ?? String(e) }));
-
-    if ("output" in resolved && resolved.output) {
-      const output = resolved.output as IntentResolutionOutput;
-      const nextConfidence = mergeConfidence(existingConfidence, output.confidence ?? {});
-      effectiveConfidence = nextConfidence;
-      const nextTrace = appendIntentTrace(existingTrace, {
-        ts: new Date().toISOString(),
-        userMessage: combined,
-        output,
-        result: resolved.kind,
-      });
-      sessionDb.updateConfidenceJson(sessionId, JSON.stringify(nextConfidence));
-      sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
-      trace("session.intent.persisted", {
-        sessionId,
-        confidenceKeys: Object.keys(nextConfidence),
-        traceLen: nextTrace.length,
-      });
-    }
-
-    if (resolved.kind === "clarify") {
-      const assistantText = resolved.question;
-      sessionMessageDb.create(crypto.randomUUID(), sessionId, "assistant", assistantText);
-
-      sessionDb.updateSpecJson(sessionId, JSON.stringify(specWithFixed));
-      persistCollectorState(sessionId, {
-        currentQuestionKey: nextSlotKey(specWithFixed as SpecDraft),
-        buffer: [],
-      });
-
-      const target: SessionState = "CLARIFYING";
-      transitionOrThrow(state, target);
-      sessionDb.updateState(sessionId, target);
-
-      return {
-        accepted: true,
-        state: target,
-        nextQuestion: assistantText,
-        done: false,
-        spec: specWithFixed,
-        patch: fixed,
-      };
-    }
-
-    if (resolved.kind === "patch") {
-      const nextSpec = resolved.merged as Record<string, unknown>;
-      sessionDb.updateSpecJson(sessionId, JSON.stringify(nextSpec));
-
-      const readiness = computeReadiness(resolved.merged, effectiveConfidence);
-      trace("session.readiness", {
-        sessionId,
-        schemaComplete: readiness.gaps.complete,
-        ready: readiness.ready,
-        minConfidence: readiness.minConfidence,
-        lowConfidenceFields: readiness.lowConfidenceFields,
-        missing: readiness.gaps.missing,
-      });
-
-      const done = readiness.ready;
-      const nextQuestion = generateNextPrompt({
-        spec: resolved.merged,
-        readiness,
-        confidence: effectiveConfidence,
-        lastUserMessage: combined,
-      });
-
-      sessionMessageDb.create(crypto.randomUUID(), sessionId, "assistant", nextQuestion);
-      persistCollectorState(sessionId, {
-        currentQuestionKey: nextSlotKey(resolved.merged),
-        buffer: [],
-      });
-
-      if (!done) {
-        const target: SessionState = "CLARIFYING";
-        transitionOrThrow(state, target);
-        sessionDb.updateState(sessionId, target);
-        return {
-          accepted: true,
-          state: target,
-          nextQuestion,
-          done: false,
-          spec: nextSpec,
-          patch: [...fixed, ...resolved.patch],
-        };
-      }
-
-      if (state === "DRAFT") {
-        transitionOrThrow("DRAFT", "CLARIFYING");
-        sessionDb.updateState(sessionId, "CLARIFYING");
-        transitionOrThrow("CLARIFYING", "READY");
-        sessionDb.updateState(sessionId, "READY");
-      } else {
-        transitionOrThrow(state, "READY");
-        sessionDb.updateState(sessionId, "READY");
-      }
-
-      return {
-        accepted: true,
-        state: "READY",
-        nextQuestion,
-        done: true,
-        spec: nextSpec,
-        patch: [...fixed, ...resolved.patch],
-      };
-    }
+      output,
+      result: resolved.kind,
+    });
+    sessionDb.updateConfidenceJson(sessionId, JSON.stringify(nextConfidence));
+    sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
+    trace("session.intent.persisted", {
+      sessionId,
+      confidenceKeys: Object.keys(nextConfidence),
+      traceLen: nextTrace.length,
+    });
   }
 
-  const interpreted = interpretIntent(specWithFixed as SpecDraft, combined);
-  trace("session.intent", { sessionId, kind: interpreted.kind });
+  if (resolved.kind === "clarify") {
+    const assistantText = resolved.question;
+    sessionMessageDb.create(crypto.randomUUID(), sessionId, "assistant", assistantText);
 
-  if (interpreted.kind === "conflict") {
-    // Persist assistant clarification.
-    const content = interpreted.message;
-    sessionMessageDb.create(crypto.randomUUID(), sessionId, "assistant", content);
-
-    // Persist fixed invariants (safe side-effect, improves UX on repeated clarifications).
-    if (fixed.length > 0) {
-      sessionDb.updateSpecJson(sessionId, JSON.stringify(specWithFixed));
-    }
-
-    // Reset buffer; treat this as a new question turn.
+    sessionDb.updateSpecJson(sessionId, JSON.stringify(specWithFixed));
     persistCollectorState(sessionId, {
-      currentQuestionKey: nextSlotKey(specWithFixed as SpecDraft),
+      currentQuestionKey: getDynamicQuestionKey(specWithFixed as SpecDraft, effectiveConfidence),
       buffer: [],
     });
 
-    // Transition into CLARIFYING (agent asked a follow-up).
     const target: SessionState = "CLARIFYING";
     transitionOrThrow(state, target);
     sessionDb.updateState(sessionId, target);
@@ -370,83 +269,55 @@ export async function processSessionMessage(
     return {
       accepted: true,
       state: target,
-      nextQuestion: content,
+      nextQuestion: assistantText,
       done: false,
       spec: specWithFixed,
       patch: fixed,
     };
   }
 
-  if (interpreted.kind === "patch") {
-    trace("session.intent.patch", { sessionId, ops: interpreted.patch.map((op) => op.path) });
-    const nextSpecCandidate = applyJsonPatch(specWithFixed as any, interpreted.patch);
-    const contractError = validatePatchedSpecOrError(nextSpecCandidate as SpecDraft);
-
-    if (contractError) {
-      trace("session.intent.contract_error", { sessionId, error: contractError });
-      const nextQuestion = getNextQuestion(specWithFixed as SpecDraft);
-      sessionMessageDb.create(
-        crypto.randomUUID(),
-        sessionId,
-        "assistant",
-        `${contractError}\n\n${nextQuestion}`
-      );
-
-      return {
-        accepted: false,
-        state,
-        nextQuestion,
-        done: false,
-        error: contractError,
-        spec: specWithFixed,
-      };
-    }
-
-    const nextSpec = nextSpecCandidate as Record<string, unknown>;
-    const done = isSpecComplete(nextSpecCandidate as SpecDraft);
-    const nextQuestion = done
-      ? "Spec looks complete. You can generate the activity."
-      : getNextQuestion(nextSpecCandidate as SpecDraft);
-    trace("session.intent.applied", { sessionId, done });
-
-    const summaryPrefix =
-      interpreted.summaryLines.length >= 2
-        ? `Got it: ${interpreted.summaryLines.join("; ")}\n\n`
-        : "";
-    const assistantText = `${summaryPrefix}${nextQuestion}`;
-
+  if (resolved.kind === "patch") {
+    const nextSpec = resolved.merged as Record<string, unknown>;
     sessionDb.updateSpecJson(sessionId, JSON.stringify(nextSpec));
 
-    sessionMessageDb.create(
-      crypto.randomUUID(),
+    const readiness = computeReadiness(resolved.merged, effectiveConfidence);
+    trace("session.readiness", {
       sessionId,
-      "assistant",
-      assistantText
-    );
-
-    persistCollectorState(sessionId, {
-      currentQuestionKey: nextSlotKey(nextSpecCandidate as SpecDraft),
-      buffer: [],
+      schemaComplete: readiness.gaps.complete,
+      ready: readiness.ready,
+      minConfidence: readiness.minConfidence,
+      lowConfidenceFields: readiness.lowConfidenceFields,
+      missing: readiness.gaps.missing,
     });
 
-    const patch: JsonPatchOp[] = [...fixed, ...interpreted.patch];
+    const done = readiness.ready;
+    const nextQuestion = generateNextPrompt({
+      spec: resolved.merged,
+      readiness,
+      confidence: effectiveConfidence,
+      lastUserMessage: combined,
+    });
+
+    sessionMessageDb.create(crypto.randomUUID(), sessionId, "assistant", nextQuestion);
+    persistCollectorState(sessionId, {
+      currentQuestionKey: getDynamicQuestionKey(resolved.merged, effectiveConfidence),
+      buffer: [],
+    });
 
     if (!done) {
       const target: SessionState = "CLARIFYING";
       transitionOrThrow(state, target);
       sessionDb.updateState(sessionId, target);
-
       return {
         accepted: true,
         state: target,
-        nextQuestion: assistantText,
+        nextQuestion,
         done: false,
         spec: nextSpec,
-        patch,
+        patch: [...fixed, ...resolved.patch],
       };
     }
 
-    // done === true
     if (state === "DRAFT") {
       transitionOrThrow("DRAFT", "CLARIFYING");
       sessionDb.updateState(sessionId, "CLARIFYING");
@@ -460,71 +331,44 @@ export async function processSessionMessage(
     return {
       accepted: true,
       state: "READY",
-      nextQuestion: assistantText,
+      nextQuestion,
       done: true,
       spec: nextSpec,
-      patch,
+      patch: [...fixed, ...resolved.patch],
     };
   }
 
-  // Legacy deterministic step (single-slot parsing).
-  // Note: pass the persisted spec so the returned patch reflects the actual mutation (includes fixed fields).
-  const result: SpecBuilderResult = specBuilderStep(currentSpec as any, combined);
+  // LLM returned noop/error: fall back to deterministic "what's missing next" prompt.
+  trace("session.intent.fallback", { sessionId, kind: resolved.kind });
+  const readiness = computeReadiness(specWithFixed as SpecDraft, effectiveConfidence);
+  const nextQuestion = generateNextPrompt({
+    spec: specWithFixed as SpecDraft,
+    readiness,
+    confidence: effectiveConfidence,
+    lastUserMessage: combined,
+  });
 
-  if (!result.accepted) {
-    const error = result.error ?? "Invalid answer.";
-    const nextQuestion = result.nextQuestion;
-
-    // Persist assistant message re-asking the same question (with error context).
-    sessionMessageDb.create(
-      crypto.randomUUID(),
-      sessionId,
-      "assistant",
-      `${error}\n\n${nextQuestion}`
-    );
-
-    // Do NOT mutate spec.
-    // Do NOT transition state.
-
-    return {
-      accepted: false,
-      state,
-      nextQuestion,
-      done: false,
-      error,
-      spec: specWithFixed,
-    };
-  }
-
-  const patch = result.patch ?? [];
-  const nextSpec = applyJsonPatch(currentSpec as any, patch);
-
-  sessionDb.updateSpecJson(sessionId, JSON.stringify(nextSpec));
-
-  const nextQuestion = result.nextQuestion;
   sessionMessageDb.create(crypto.randomUUID(), sessionId, "assistant", nextQuestion);
-  persistCollectorState(sessionId, { currentQuestionKey: nextSlotKey(nextSpec as SpecDraft), buffer: [] });
+  persistCollectorState(sessionId, {
+    currentQuestionKey: getDynamicQuestionKey(specWithFixed as SpecDraft, effectiveConfidence),
+    buffer: [],
+  });
 
-  // Update session state (strict transitions)
-  if (!result.done) {
-    // DRAFT -> CLARIFYING, CLARIFYING -> CLARIFYING
+  if (!readiness.ready) {
     const target: SessionState = "CLARIFYING";
     transitionOrThrow(state, target);
     sessionDb.updateState(sessionId, target);
-
     return {
       accepted: true,
       state: target,
       nextQuestion,
       done: false,
-      spec: nextSpec,
-      patch,
+      spec: specWithFixed,
+      patch: fixed,
     };
   }
 
-  // done === true
   if (state === "DRAFT") {
-    // Only DRAFT -> CLARIFYING is allowed directly. Then CLARIFYING -> READY.
     transitionOrThrow("DRAFT", "CLARIFYING");
     sessionDb.updateState(sessionId, "CLARIFYING");
     transitionOrThrow("CLARIFYING", "READY");
@@ -539,8 +383,8 @@ export async function processSessionMessage(
     state: "READY",
     nextQuestion,
     done: true,
-    spec: nextSpec,
-    patch,
+    spec: specWithFixed,
+    patch: fixed,
   };
 }
 
@@ -624,6 +468,9 @@ export async function generateFromSession(
       );
     }
     let spec: ActivitySpec = specResult.data;
+    if (!isLanguageSupportedForGeneration(spec.language)) {
+      throw new Error(`Language "${spec.language}" is not supported for generation yet.`);
+    }
 
     let problems: GeneratedProblem[] | null = null;
     let usedFallback = false;

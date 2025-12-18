@@ -1,9 +1,16 @@
 import { z } from "zod";
 
 export const CODEMM_SPEC_VERSION = "1.0" as const;
-export const CODEMM_DEFAULT_CONSTRAINTS = "Java 17, JUnit 5, no package declarations." as const;
+export const CODEMM_DEFAULT_TEST_CASE_COUNT = 8 as const;
 
-export const ActivityLanguageSchema = z.enum(["java"]);
+// Backwards-compatible name; this is the Java default in Codemm v1.
+export const CODEMM_DEFAULT_CONSTRAINTS = "Java 17, JUnit 5, no package declarations." as const;
+export const CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE = {
+  java: CODEMM_DEFAULT_CONSTRAINTS,
+  python: "Python 3.11, pytest, no external libraries." as const,
+} as const;
+
+export const ActivityLanguageSchema = z.enum(["java", "python"]);
 export type ActivityLanguage = z.infer<typeof ActivityLanguageSchema>;
 
 export const DifficultySchema = z.enum(["easy", "medium", "hard"]);
@@ -58,7 +65,7 @@ export const ActivitySpecSchema = z
     constraints: z.string().trim().min(1).max(2000),
 
     // Must be exactly 8 (Codemm v1.0 rule)
-    test_case_count: z.literal(8),
+    test_case_count: z.literal(CODEMM_DEFAULT_TEST_CASE_COUNT),
   })
   .strict()
   .superRefine((spec, ctx) => {
@@ -71,7 +78,16 @@ export const ActivitySpecSchema = z
       });
     }
 
-    // Java-only for now; enforce that constraints remind about packages/tests.
+    const expectedConstraints = CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE[spec.language];
+    if (spec.constraints !== expectedConstraints) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["constraints"],
+        message: `constraints must be exactly "${expectedConstraints}" for language "${spec.language}".`,
+      });
+    }
+
+    // Java-only invariants enforced via constraints.
     if (spec.language === "java") {
       const c = spec.constraints.toLowerCase();
       const mentionsNoPackage = c.includes("no package");
@@ -100,7 +116,7 @@ export function createEmptyActivitySpec(): ActivitySpec {
     ],
     topic_tags: ["oop"],
     problem_style: "stdout",
-    constraints: CODEMM_DEFAULT_CONSTRAINTS,
-    test_case_count: 8,
+    constraints: CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE.java,
+    test_case_count: CODEMM_DEFAULT_TEST_CASE_COUNT,
   };
 }

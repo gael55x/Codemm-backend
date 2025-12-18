@@ -11,7 +11,7 @@ exports.ProblemSlotSchema = zod_1.z
     language: activitySpec_1.ActivityLanguageSchema,
     problem_style: zod_1.z.string().trim().min(1).max(64),
     constraints: zod_1.z.string().trim().min(1).max(2000),
-    test_case_count: zod_1.z.literal(8),
+    test_case_count: zod_1.z.literal(activitySpec_1.CODEMM_DEFAULT_TEST_CASE_COUNT),
 })
     .strict();
 exports.ProblemPlanSchema = zod_1.z
