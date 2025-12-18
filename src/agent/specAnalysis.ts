@@ -1,6 +1,6 @@
 import type { ActivitySpec } from "../contracts/activitySpec";
 import { ActivitySpecSchema } from "../contracts/activitySpec";
-import type { SpecDraft } from "../specBuilder/validators";
+import type { SpecDraft } from "../compiler/specDraft";
 import { isLanguageSupportedForGeneration, listAgentSelectableLanguages } from "../languages/profiles";
 
 export type SpecGaps = {

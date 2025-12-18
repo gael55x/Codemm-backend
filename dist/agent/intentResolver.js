@@ -6,8 +6,8 @@ const activitySpec_1 = require("../contracts/activitySpec");
 const codex_1 = require("../infra/llm/codex");
 const jsonParser_1 = require("../utils/jsonParser");
 const trace_1 = require("../utils/trace");
-const patch_1 = require("../specBuilder/patch");
-const validators_1 = require("../specBuilder/validators");
+const jsonPatch_1 = require("../compiler/jsonPatch");
+const specDraft_1 = require("../compiler/specDraft");
 const profiles_1 = require("../languages/profiles");
 const CODEX_MODEL = process.env.CODEX_MODEL ?? "gpt-4.1";
 const CONTRACT_LANGUAGES = activitySpec_1.ActivityLanguageSchema.options.join(", ");
@@ -155,8 +155,8 @@ async function resolveIntentWithLLM(args) {
             }
             return { kind: "noop", output };
         }
-        const merged = (0, patch_1.applyJsonPatch)(args.currentSpec, patch);
-        const contractError = (0, validators_1.validatePatchedSpecOrError)(merged);
+        const merged = (0, jsonPatch_1.applyJsonPatch)(args.currentSpec, patch);
+        const contractError = (0, specDraft_1.validatePatchedSpecOrError)(merged);
         if (contractError) {
             (0, trace_1.trace)("agent.intentResolver.contract_reject", { error: contractError, patchOps: patch.map((p) => p.path) });
             const clarification = output.clarificationQuestion ??
@@ -164,7 +164,7 @@ async function resolveIntentWithLLM(args) {
             return { kind: "clarify", question: clarification, output };
         }
         // Safety: ensure we only keep keys that the draft schema allows.
-        const finalDraftCheck = validators_1.ActivitySpecDraftSchema.safeParse(merged);
+        const finalDraftCheck = specDraft_1.ActivitySpecDraftSchema.safeParse(merged);
         if (!finalDraftCheck.success) {
             (0, trace_1.trace)("agent.intentResolver.draft_schema_reject", { error: finalDraftCheck.error.issues[0]?.message ?? "draft invalid" });
             return { kind: "error", error: "Inferred patch failed draft validation." };

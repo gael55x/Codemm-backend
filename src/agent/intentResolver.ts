@@ -4,8 +4,8 @@ import type { ActivitySpec } from "../contracts/activitySpec";
 import { createCodexCompletion } from "../infra/llm/codex";
 import { tryParseJson } from "../utils/jsonParser";
 import { trace, traceText } from "../utils/trace";
-import { applyJsonPatch, type JsonPatchOp } from "../specBuilder/patch";
-import { ActivitySpecDraftSchema, type SpecDraft, validatePatchedSpecOrError } from "../specBuilder/validators";
+import { applyJsonPatch, type JsonPatchOp } from "../compiler/jsonPatch";
+import { ActivitySpecDraftSchema, type SpecDraft, validatePatchedSpecOrError } from "../compiler/specDraft";
 import { LANGUAGE_PROFILES, listAgentSelectableLanguages } from "../languages/profiles";
 
 export type IntentResolutionResult =

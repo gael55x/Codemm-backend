@@ -1,5 +1,5 @@
 import { type SessionState } from "../contracts/session";
-import { type JsonPatchOp } from "../specBuilder/patch";
+import { type JsonPatchOp } from "../compiler/jsonPatch";
 import type { GeneratedProblem } from "../contracts/problem";
 export type SessionRecord = {
     id: string;

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ActivitySpec } from "../contracts/activitySpec";
-import type { JsonPatchOp } from "./patch";
+import type { JsonPatchOp } from "./jsonPatch";
 export type SpecDraft = Partial<ActivitySpec> & {
     version?: "1.0";
 };
@@ -82,35 +82,6 @@ export declare const ActivitySpecDraftSchema: z.ZodEffects<z.ZodObject<{
     test_case_count?: 8 | undefined;
 }>;
 export declare function ensureFixedFields(spec: SpecDraft): JsonPatchOp[];
-export declare function isSpecComplete(spec: SpecDraft): spec is ActivitySpec;
 export declare function validatePatchedSpecOrError(patched: SpecDraft): string | null;
-export declare function buildPatchForLanguage(answer: string): {
-    patch?: JsonPatchOp[];
-    error?: string;
-};
-export declare function buildPatchForProblemCount(answer: string): {
-    patch?: JsonPatchOp[];
-    error?: string;
-};
-export declare function parseDifficultyCounts(answer: string): {
-    easy?: number;
-    medium?: number;
-    hard?: number;
-} | null;
-export declare function buildPatchForDifficultyPlan(spec: SpecDraft, answer: string): {
-    patch?: JsonPatchOp[];
-    error?: string;
-};
-export declare function buildPatchForTopicTags(answer: string): {
-    patch?: JsonPatchOp[];
-    error?: string;
-};
-export declare function buildPatchForProblemStyle(answer: string): {
-    patch?: JsonPatchOp[];
-    error?: string;
-};
-export declare function buildPatchForConstraints(answer: string): {
-    patch?: JsonPatchOp[];
-    error?: string;
-};
-//# sourceMappingURL=validators.d.ts.map
+export declare function isSpecCompleteForGeneration(spec: SpecDraft): spec is ActivitySpec;
+//# sourceMappingURL=specDraft.d.ts.map

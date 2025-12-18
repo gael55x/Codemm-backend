@@ -11,4 +11,4 @@ export type JsonPatchOp = {
     path: string;
 };
 export declare function applyJsonPatch<T extends Record<string, any>>(obj: T, patch: JsonPatchOp[]): T;
-//# sourceMappingURL=patch.d.ts.map
+//# sourceMappingURL=jsonPatch.d.ts.map

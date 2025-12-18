@@ -10,12 +10,12 @@ exports.generateFromSession = generateFromSession;
 const crypto_1 = __importDefault(require("crypto"));
 const database_1 = require("../database");
 const session_1 = require("../contracts/session");
-const patch_1 = require("../specBuilder/patch");
+const jsonPatch_1 = require("../compiler/jsonPatch");
 const activitySpec_1 = require("../contracts/activitySpec");
 const profiles_1 = require("../languages/profiles");
 const planner_1 = require("../planner");
 const generation_1 = require("../generation");
-const validators_1 = require("../specBuilder/validators");
+const specDraft_1 = require("../compiler/specDraft");
 const trace_1 = require("../utils/trace");
 const intentResolver_1 = require("../agent/intentResolver");
 const readiness_1 = require("../agent/readiness");
@@ -127,8 +127,8 @@ function transitionOrThrow(from, to) {
 function createSession(userId) {
     const id = crypto_1.default.randomUUID();
     const state = "DRAFT";
-    const fixed = (0, validators_1.ensureFixedFields)({});
-    const initialSpec = fixed.length > 0 ? (0, patch_1.applyJsonPatch)({}, fixed) : {};
+    const fixed = (0, specDraft_1.ensureFixedFields)({});
+    const initialSpec = fixed.length > 0 ? (0, jsonPatch_1.applyJsonPatch)({}, fixed) : {};
     // Contract allows null or {} — DB column is NOT NULL, so we store {}.
     database_1.sessionDb.create(id, state, JSON.stringify(initialSpec), userId ?? null);
     const initialQuestionKey = (0, questionKey_1.getDynamicQuestionKey)(initialSpec, {});
@@ -166,8 +166,8 @@ async function processSessionMessage(sessionId, message) {
     const existingConfidence = parseJsonObject(s.confidence_json);
     // Always persist user message.
     database_1.sessionMessageDb.create(crypto_1.default.randomUUID(), sessionId, "user", message);
-    const fixed = (0, validators_1.ensureFixedFields)(currentSpec);
-    const specWithFixed = fixed.length > 0 ? (0, patch_1.applyJsonPatch)(currentSpec, fixed) : currentSpec;
+    const fixed = (0, specDraft_1.ensureFixedFields)(currentSpec);
+    const specWithFixed = fixed.length > 0 ? (0, jsonPatch_1.applyJsonPatch)(currentSpec, fixed) : currentSpec;
     (0, trace_1.trace)("session.spec.fixed", { sessionId, fixedOps: fixed.map((op) => op.path) });
     const expectedQuestionKey = (0, questionKey_1.getDynamicQuestionKey)(specWithFixed, existingConfidence);
     const collector = getCollectorState(sessionId, expectedQuestionKey);
@@ -427,7 +427,7 @@ async function generateFromSession(sessionId, userId) {
                                 patch: decision.patch,
                             });
                             persistConfidencePatch(decision.patch);
-                            const adjusted = (0, patch_1.applyJsonPatch)(spec, decision.patch);
+                            const adjusted = (0, jsonPatch_1.applyJsonPatch)(spec, decision.patch);
                             const adjustedRes = activitySpec_1.ActivitySpecSchema.safeParse(adjusted);
                             if (!adjustedRes.success) {
                                 persistTraceEvent({

@@ -37,3 +37,4 @@ export function applyJsonPatch<T extends Record<string, any>>(obj: T, patch: Jso
 
   return next;
 }
+
