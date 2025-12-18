@@ -7,7 +7,15 @@ const fs_1 = require("fs");
 const os_1 = require("os");
 const path_1 = require("path");
 const trace_1 = require("./utils/trace");
-const JUDGE_TIMEOUT_MS = Number.parseInt(process.env.JUDGE_TIMEOUT_MS ?? "8000", 10);
+function getJudgeTimeoutMs() {
+    const raw = process.env.JUDGE_TIMEOUT_MS;
+    if (!raw)
+        return 15000;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0)
+        return 15000;
+    return Math.min(Math.floor(n), 30000);
+}
 function stripAnsi(text) {
     return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
@@ -39,8 +47,8 @@ function execAsync(command, cwd) {
     return new Promise((resolve, reject) => {
         (0, child_process_1.exec)(command, {
             cwd,
-            timeout: Number.isFinite(JUDGE_TIMEOUT_MS) ? JUDGE_TIMEOUT_MS : 8000,
-            maxBuffer: 256 * 1024,
+            timeout: getJudgeTimeoutMs(),
+            maxBuffer: 1024 * 1024,
         }, (error, stdout, stderr) => {
             const exitCode = error && typeof error.code === "number" ? error.code : error ? 1 : 0;
             const timedOutByNode = Boolean(error?.killed) &&
