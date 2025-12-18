@@ -19,7 +19,7 @@ export type IntentResolutionResult = {
 };
 declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
     inferredPatch: z.ZodObject<{
-        language: z.ZodOptional<z.ZodEnum<["java"]>>;
+        language: z.ZodOptional<z.ZodEnum<["java", "python"]>>;
         problem_count: z.ZodOptional<z.ZodNumber>;
         difficulty_plan: z.ZodOptional<z.ZodArray<z.ZodObject<{
             difficulty: z.ZodEnum<["easy", "medium", "hard"]>;
@@ -34,7 +34,7 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
         topic_tags: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         problem_style: z.ZodOptional<z.ZodEnum<["stdout", "return", "mixed"]>>;
     }, "strict", z.ZodTypeAny, {
-        language?: "java" | undefined;
+        language?: "java" | "python" | undefined;
         problem_count?: number | undefined;
         difficulty_plan?: {
             difficulty: "easy" | "medium" | "hard";
@@ -43,7 +43,7 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
         topic_tags?: string[] | undefined;
         problem_style?: "stdout" | "return" | "mixed" | undefined;
     }, {
-        language?: "java" | undefined;
+        language?: "java" | "python" | undefined;
         problem_count?: number | undefined;
         difficulty_plan?: {
             difficulty: "easy" | "medium" | "hard";
@@ -57,7 +57,7 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
     clarificationQuestion: z.ZodOptional<z.ZodString>;
 }, "strict", z.ZodTypeAny, {
     inferredPatch: {
-        language?: "java" | undefined;
+        language?: "java" | "python" | undefined;
         problem_count?: number | undefined;
         difficulty_plan?: {
             difficulty: "easy" | "medium" | "hard";
@@ -71,7 +71,7 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
     clarificationQuestion?: string | undefined;
 }, {
     inferredPatch: {
-        language?: "java" | undefined;
+        language?: "java" | "python" | undefined;
         problem_count?: number | undefined;
         difficulty_plan?: {
             difficulty: "easy" | "medium" | "hard";
@@ -85,7 +85,7 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
     clarificationQuestion?: string | undefined;
 }>, {
     inferredPatch: {
-        language?: "java" | undefined;
+        language?: "java" | "python" | undefined;
         problem_count?: number | undefined;
         difficulty_plan?: {
             difficulty: "easy" | "medium" | "hard";
@@ -99,7 +99,7 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
     clarificationQuestion?: string | undefined;
 }, {
     inferredPatch: {
-        language?: "java" | undefined;
+        language?: "java" | "python" | undefined;
         problem_count?: number | undefined;
         difficulty_plan?: {
             difficulty: "easy" | "medium" | "hard";

@@ -6,7 +6,7 @@
 # Usage:
 #   chmod +x run-codem-backend.sh
 #   ./run-codem-backend.sh
-#   ./run-codem-backend.sh --agent-mode dynamic --trace
+#   ./run-codem-backend.sh --trace
 #
 # Requirements:
 #   - Docker installed and running
@@ -26,8 +26,6 @@ Usage:
   ./run-codem-backend.sh [options]
 
 Options:
-  --agent-mode <mode>     Sets CODEMM_AGENT_MODE (e.g. dynamic)
-  --dynamic               Shortcut for --agent-mode dynamic
   --trace                 Sets CODEMM_TRACE=1
   --no-trace              Sets CODEMM_TRACE=0
   --port <number>         Sets PORT (default: 4000)
@@ -37,13 +35,13 @@ Options:
   -h, --help              Show this help
 
 Examples:
-  CODEMM_AGENT_MODE=dynamic CODEMM_TRACE=1 ./run-codem-backend.sh
-  ./run-codem-backend.sh --dynamic --trace
+  CODEMM_TRACE=1 ./run-codem-backend.sh
+  ./run-codem-backend.sh --trace
   ./run-codem-backend.sh --dev --trace --port 4000
 EOF
 }
 
-agent_mode="${CODEMM_AGENT_MODE:-}"
+agent_mode="${CODEMM_AGENT_MODE:-dynamic}"
 trace_flag="${CODEMM_TRACE:-}"
 port_override="${PORT:-}"
 rebuild_judge="${REBUILD_JUDGE:-0}"
@@ -101,9 +99,12 @@ done
 echo "=== Codem backend ==="
 echo "Repo: ${BACKEND_DIR}"
 
-if [[ -n "${agent_mode}" ]]; then
-  export CODEMM_AGENT_MODE="${agent_mode}"
+if [[ "${agent_mode}" != "dynamic" ]]; then
+  echo "WARNING: CODEMM_AGENT_MODE=${agent_mode} requested, but legacy mode has been removed; using dynamic." >&2
+  agent_mode="dynamic"
 fi
+export CODEMM_AGENT_MODE="${agent_mode}"
+
 if [[ -n "${trace_flag}" ]]; then
   export CODEMM_TRACE="${trace_flag}"
 fi

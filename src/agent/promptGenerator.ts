@@ -1,6 +1,7 @@
 import type { ActivitySpec } from "../contracts/activitySpec";
 import type { SpecDraft } from "../specBuilder/validators";
 import type { ConfidenceMap, ReadinessResult } from "./readiness";
+import { listAgentSelectableLanguages } from "../languages/profiles";
 
 function formatKnown(spec: SpecDraft): string {
   const parts: string[] = [];
@@ -34,6 +35,10 @@ export function generateNextPrompt(args: {
   const known = formatKnown(args.spec);
   const preface = known ? `So far: ${known}.\n\n` : "";
 
+  if (args.readiness.ready) {
+    return preface + "Spec looks complete. You can generate the activity.";
+  }
+
   // If schema complete but confidence is low, prefer confirmation-style prompts.
   if (args.readiness.gaps.complete && args.readiness.lowConfidenceFields.length > 0) {
     const fields = args.readiness.lowConfidenceFields.map(String);
@@ -47,7 +52,8 @@ export function generateNextPrompt(args: {
   // Schema gaps drive the next question.
   const missing = args.readiness.gaps.missing;
   if (missing.includes("language")) {
-    return preface + "Which language should we use? (Java is available today.)";
+    const langs = listAgentSelectableLanguages().map((l) => l.toUpperCase()).join(", ");
+    return preface + `Which language should we use? (${langs || "JAVA"} is available today.)`;
   }
   if (missing.includes("problem_count")) {
     return preface + "How many problems should we build? (1–7 works well.)";
@@ -95,4 +101,3 @@ export function generateNextPrompt(args: {
 
   return preface + "What would you like this activity to focus on?";
 }
-

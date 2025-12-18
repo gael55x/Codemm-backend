@@ -88,11 +88,16 @@ Return ONLY valid JSON. No markdown. No code fences. No prose.`;
  * Throws on any validation failure.
  */
 async function generateSingleProblem(slot, opts) {
+    if (slot.language !== "java") {
+        throw new errors_1.GenerationContractError(`Language "${slot.language}" is not supported for generation yet.`, {
+            slotIndex: slot.index,
+        });
+    }
     const prompt = opts?.repair ? buildRepairPrompt(slot, opts.repair) : (0, prompts_1.buildSlotPrompt)(slot);
     (0, trace_1.trace)("generation.slot.start", { slotIndex: slot.index, difficulty: slot.difficulty, repair: Boolean(opts?.repair) });
     (0, trace_1.traceText)("generation.prompt", prompt, { extra: { slotIndex: slot.index, repair: Boolean(opts?.repair) } });
     const completion = await (0, codex_1.createCodexCompletion)({
-        system: prompts_1.V1_PROBLEM_GENERATOR_SYSTEM_PROMPT,
+        system: (0, prompts_1.getSystemPromptForSlot)(slot),
         user: prompt,
         model: CODEX_MODEL,
         temperature: TEMPERATURE,

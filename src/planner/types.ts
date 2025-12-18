@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DifficultySchema, ActivityLanguageSchema } from "../contracts/activitySpec";
+import { DifficultySchema, ActivityLanguageSchema, CODEMM_DEFAULT_TEST_CASE_COUNT } from "../contracts/activitySpec";
 
 export const ProblemSlotSchema = z
   .object({
@@ -9,7 +9,7 @@ export const ProblemSlotSchema = z
     language: ActivityLanguageSchema,
     problem_style: z.string().trim().min(1).max(64),
     constraints: z.string().trim().min(1).max(2000),
-    test_case_count: z.literal(8),
+    test_case_count: z.literal(CODEMM_DEFAULT_TEST_CASE_COUNT),
   })
   .strict();
 

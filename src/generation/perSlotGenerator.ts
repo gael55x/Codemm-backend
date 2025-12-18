@@ -5,7 +5,7 @@ import { buildDefaultClassSkeleton, inferClassName } from "../utils/javaCodegen"
 import { isValidJUnit5TestSuite } from "../contracts/javaRules";
 import { GeneratedProblemDraftSchema, type GeneratedProblemDraft } from "../contracts/problem";
 import type { ProblemSlot } from "../planner/types";
-import { buildSlotPrompt, V1_PROBLEM_GENERATOR_SYSTEM_PROMPT } from "./prompts";
+import { buildSlotPrompt, getSystemPromptForSlot } from "./prompts";
 import { trace, traceText } from "../utils/trace";
 import { GenerationContractError } from "./errors";
 
@@ -108,12 +108,17 @@ export async function generateSingleProblem(
   slot: ProblemSlot,
   opts?: { repair?: RepairContext }
 ): Promise<GeneratedDraftWithMeta> {
+  if (slot.language !== "java") {
+    throw new GenerationContractError(`Language "${slot.language}" is not supported for generation yet.`, {
+      slotIndex: slot.index,
+    });
+  }
   const prompt = opts?.repair ? buildRepairPrompt(slot, opts.repair) : buildSlotPrompt(slot);
   trace("generation.slot.start", { slotIndex: slot.index, difficulty: slot.difficulty, repair: Boolean(opts?.repair) });
   traceText("generation.prompt", prompt, { extra: { slotIndex: slot.index, repair: Boolean(opts?.repair) } });
 
   const completion = await createCodexCompletion({
-    system: V1_PROBLEM_GENERATOR_SYSTEM_PROMPT,
+    system: getSystemPromptForSlot(slot),
     user: prompt,
     model: CODEX_MODEL,
     temperature: TEMPERATURE,

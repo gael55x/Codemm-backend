@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateNextPrompt = generateNextPrompt;
+const profiles_1 = require("../languages/profiles");
 function formatKnown(spec) {
     const parts = [];
     if (spec.language)
@@ -32,6 +33,9 @@ function confidenceHint(confidence, key) {
 function generateNextPrompt(args) {
     const known = formatKnown(args.spec);
     const preface = known ? `So far: ${known}.\n\n` : "";
+    if (args.readiness.ready) {
+        return preface + "Spec looks complete. You can generate the activity.";
+    }
     // If schema complete but confidence is low, prefer confirmation-style prompts.
     if (args.readiness.gaps.complete && args.readiness.lowConfidenceFields.length > 0) {
         const fields = args.readiness.lowConfidenceFields.map(String);
@@ -42,7 +46,8 @@ function generateNextPrompt(args) {
     // Schema gaps drive the next question.
     const missing = args.readiness.gaps.missing;
     if (missing.includes("language")) {
-        return preface + "Which language should we use? (Java is available today.)";
+        const langs = (0, profiles_1.listAgentSelectableLanguages)().map((l) => l.toUpperCase()).join(", ");
+        return preface + `Which language should we use? (${langs || "JAVA"} is available today.)`;
     }
     if (missing.includes("problem_count")) {
         return preface + "How many problems should we build? (1–7 works well.)";

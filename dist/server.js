@@ -6,10 +6,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
-const judge_1 = require("./judge");
-const javaRun_1 = require("./execution/javaRun");
 const database_1 = require("./database");
 const sessions_1 = require("./routes/sessions");
+const activitySpec_1 = require("./contracts/activitySpec");
+const profiles_1 = require("./languages/profiles");
 const auth_1 = require("./auth");
 dotenv_1.default.config();
 // Initialize database
@@ -27,8 +27,17 @@ app.use("/sessions", sessions_1.sessionsRouter);
 app.post("/run", async (req, res) => {
     try {
         const { code, language, files, mainClass } = req.body ?? {};
-        if (language !== "java") {
-            return res.status(400).json({ error: "Only 'java' is supported." });
+        const langParsed = activitySpec_1.ActivityLanguageSchema.safeParse(language);
+        if (!langParsed.success) {
+            return res.status(400).json({ error: "Invalid language." });
+        }
+        const lang = langParsed.data;
+        if (!(0, profiles_1.isLanguageSupportedForExecution)(lang)) {
+            return res.status(400).json({ error: `Language "${lang}" is not supported for /run yet.` });
+        }
+        const profile = (0, profiles_1.getLanguageProfile)(lang);
+        if (!profile.executionAdapter) {
+            return res.status(400).json({ error: `No execution adapter configured for "${lang}".` });
         }
         const maxTotalCodeLength = 200000; // 200KB
         const maxFileCount = 12;
@@ -60,11 +69,14 @@ app.post("/run", async (req, res) => {
                 }
                 safeFiles[filename] = source;
             }
-            const runOpts = { files: safeFiles };
+            const execReq = {
+                kind: "files",
+                files: safeFiles,
+            };
             if (typeof mainClass === "string" && mainClass.trim()) {
-                runOpts.mainClass = mainClass.trim();
+                execReq.mainClass = mainClass.trim();
             }
-            const result = await (0, javaRun_1.runJavaFiles)(runOpts);
+            const result = await profile.executionAdapter.run(execReq);
             return res.json({ stdout: result.stdout, stderr: result.stderr });
         }
         if (typeof code !== "string" || !code.trim()) {
@@ -75,7 +87,7 @@ app.post("/run", async (req, res) => {
                 error: `Code exceeds maximum length of ${maxTotalCodeLength} characters.`,
             });
         }
-        const result = await (0, javaRun_1.runJavaCodeOnly)(code);
+        const result = await profile.executionAdapter.run({ kind: "code", code });
         res.json({ stdout: result.stdout, stderr: result.stderr });
     }
     catch (err) {
@@ -86,12 +98,24 @@ app.post("/run", async (req, res) => {
 // Graded execution: MUST include test suite (unit tests).
 app.post("/submit", auth_1.optionalAuth, async (req, res) => {
     try {
-        const { code, testSuite, activityId, problemId, files } = req.body ?? {};
+        const { code, testSuite, activityId, problemId, files, language } = req.body ?? {};
         // Guard: graded execution requires non-empty code and test suite
         if (typeof testSuite !== "string" || !testSuite.trim()) {
             return res.status(400).json({
                 error: "testSuite is required for graded execution. Use /run for code-only execution.",
             });
+        }
+        const langParsed = activitySpec_1.ActivityLanguageSchema.safeParse(language ?? "java");
+        if (!langParsed.success) {
+            return res.status(400).json({ error: "Invalid language." });
+        }
+        const lang = langParsed.data;
+        if (!(0, profiles_1.isLanguageSupportedForJudge)(lang)) {
+            return res.status(400).json({ error: `Language "${lang}" is not supported for /submit yet.` });
+        }
+        const profile = (0, profiles_1.getLanguageProfile)(lang);
+        if (!profile.judgeAdapter) {
+            return res.status(400).json({ error: `No judge adapter configured for "${lang}".` });
         }
         const maxTotalCodeLength = 200000; // 200KB
         const maxFileCount = 16;
@@ -125,7 +149,7 @@ app.post("/submit", auth_1.optionalAuth, async (req, res) => {
                 }
                 safeFiles[filename] = source;
             }
-            result = await (0, judge_1.runJudgeFiles)(safeFiles, testSuite);
+            result = await profile.judgeAdapter.judge({ kind: "files", files: safeFiles, testSuite });
             codeForPersistence = JSON.stringify(safeFiles);
         }
         else {
@@ -137,7 +161,7 @@ app.post("/submit", auth_1.optionalAuth, async (req, res) => {
                     error: `Total code exceeds maximum length of ${maxTotalCodeLength} characters.`,
                 });
             }
-            result = await (0, judge_1.runJudge)(code, testSuite);
+            result = await profile.judgeAdapter.judge({ kind: "code", code, testSuite });
             codeForPersistence = code;
         }
         // Save submission to database if user is authenticated and owns the activity/problem

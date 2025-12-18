@@ -1,6 +1,7 @@
 import type { ActivitySpec } from "../contracts/activitySpec";
 import { ActivitySpecSchema } from "../contracts/activitySpec";
 import type { SpecDraft } from "../specBuilder/validators";
+import { isLanguageSupportedForGeneration, listAgentSelectableLanguages } from "../languages/profiles";
 
 export type SpecGaps = {
   complete: boolean;
@@ -15,6 +16,15 @@ export type SpecGaps = {
 export function analyzeSpecGaps(spec: SpecDraft): SpecGaps {
   const res = ActivitySpecSchema.safeParse(spec);
   if (res.success) {
+    if (!isLanguageSupportedForGeneration(res.data.language)) {
+      return {
+        complete: false,
+        missing: [],
+        invalid: {
+          language: `Language "${res.data.language}" is not supported for generation yet.`,
+        },
+      };
+    }
     return { complete: true, missing: [], invalid: {} };
   }
 
@@ -51,7 +61,7 @@ export function defaultNextQuestionFromGaps(gaps: SpecGaps): string {
 
   switch (next) {
     case "language":
-      return "Which language should we use? (Java is available today.)";
+      return `Which language should we use? (${listAgentSelectableLanguages().join(", ") || "java"} is available today.)`;
     case "problem_count":
       return "How many problems should we build? (1-7 works well.)";
     case "difficulty_plan":
@@ -64,4 +74,3 @@ export function defaultNextQuestionFromGaps(gaps: SpecGaps): string {
       return "What would you like this activity to focus on?";
   }
 }
-

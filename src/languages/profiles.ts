@@ -1,0 +1,61 @@
+import {
+  CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE,
+  CODEMM_DEFAULT_TEST_CASE_COUNT,
+} from "../contracts/activitySpec";
+import { buildJavaSlotPrompt, JAVA_V1_GENERATOR_SYSTEM_PROMPT } from "./javaPrompts";
+import { javaExecutionAdapter, javaJudgeAdapter } from "./javaAdapters";
+import type { LanguageId, LanguageProfile } from "./types";
+
+export const LANGUAGE_PROFILES: Record<LanguageId, LanguageProfile> = {
+  java: {
+    language: "java",
+    displayName: "Java",
+    runtime: "Java 17",
+    testFramework: "JUnit 5",
+    defaultConstraints: CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE.java,
+    defaultTestCaseCount: CODEMM_DEFAULT_TEST_CASE_COUNT,
+    support: { execution: true, judge: true, generation: true },
+    promptHints: ["No package declarations.", "JUnit 5 (exactly 8 @Test methods)."],
+    executionAdapter: javaExecutionAdapter,
+    judgeAdapter: javaJudgeAdapter,
+    generator: {
+      systemPrompt: JAVA_V1_GENERATOR_SYSTEM_PROMPT,
+      buildSlotPrompt: buildJavaSlotPrompt,
+    },
+  },
+  python: {
+    language: "python",
+    displayName: "Python",
+    runtime: "Python 3.11",
+    testFramework: "pytest",
+    defaultConstraints: CODEMM_DEFAULT_CONSTRAINTS_BY_LANGUAGE.python,
+    defaultTestCaseCount: CODEMM_DEFAULT_TEST_CASE_COUNT,
+    // Stubbed until we add a python judge image + validators + generator prompts.
+    support: { execution: false, judge: false, generation: false },
+    promptHints: ["pytest (exactly 8 test cases)."],
+  },
+};
+
+export function listAgentSelectableLanguages(): LanguageId[] {
+  // What we allow the agent to select without additional product work.
+  // If you want to "turn on" Python later, flip its support flags + add adapters.
+  return Object.values(LANGUAGE_PROFILES)
+    .filter((p) => p.support.generation && p.support.judge)
+    .map((p) => p.language);
+}
+
+export function getLanguageProfile(language: LanguageId): LanguageProfile {
+  return LANGUAGE_PROFILES[language];
+}
+
+export function isLanguageSupportedForGeneration(language: LanguageId): boolean {
+  return Boolean(LANGUAGE_PROFILES[language]?.support.generation);
+}
+
+export function isLanguageSupportedForJudge(language: LanguageId): boolean {
+  return Boolean(LANGUAGE_PROFILES[language]?.support.judge);
+}
+
+export function isLanguageSupportedForExecution(language: LanguageId): boolean {
+  return Boolean(LANGUAGE_PROFILES[language]?.support.execution);
+}

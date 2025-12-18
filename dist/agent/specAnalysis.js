@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.analyzeSpecGaps = analyzeSpecGaps;
 exports.defaultNextQuestionFromGaps = defaultNextQuestionFromGaps;
 const activitySpec_1 = require("../contracts/activitySpec");
+const profiles_1 = require("../languages/profiles");
 /**
  * Computes "what's missing/invalid" from the strict ActivitySpecSchema, without relying on slot order.
  * This is the first building block for a goal-driven prompt generator.
@@ -10,6 +11,15 @@ const activitySpec_1 = require("../contracts/activitySpec");
 function analyzeSpecGaps(spec) {
     const res = activitySpec_1.ActivitySpecSchema.safeParse(spec);
     if (res.success) {
+        if (!(0, profiles_1.isLanguageSupportedForGeneration)(res.data.language)) {
+            return {
+                complete: false,
+                missing: [],
+                invalid: {
+                    language: `Language "${res.data.language}" is not supported for generation yet.`,
+                },
+            };
+        }
         return { complete: true, missing: [], invalid: {} };
     }
     const missing = new Set();
@@ -40,7 +50,7 @@ function defaultNextQuestionFromGaps(gaps) {
     const next = priority.find((k) => gaps.missing.includes(k)) ?? gaps.missing[0];
     switch (next) {
         case "language":
-            return "Which language should we use? (Java is available today.)";
+            return `Which language should we use? (${(0, profiles_1.listAgentSelectableLanguages)().join(", ") || "java"} is available today.)`;
         case "problem_count":
             return "How many problems should we build? (1-7 works well.)";
         case "difficulty_plan":

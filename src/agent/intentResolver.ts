@@ -1,11 +1,12 @@
 import { z } from "zod";
-import { ActivityLanguageSchema, CODEMM_DEFAULT_CONSTRAINTS } from "../contracts/activitySpec";
+import { ActivityLanguageSchema, CODEMM_DEFAULT_TEST_CASE_COUNT } from "../contracts/activitySpec";
 import type { ActivitySpec } from "../contracts/activitySpec";
 import { createCodexCompletion } from "../infra/llm/codex";
 import { tryParseJson } from "../utils/jsonParser";
 import { trace, traceText } from "../utils/trace";
 import { applyJsonPatch, type JsonPatchOp } from "../specBuilder/patch";
 import { ActivitySpecDraftSchema, type SpecDraft, validatePatchedSpecOrError } from "../specBuilder/validators";
+import { LANGUAGE_PROFILES, listAgentSelectableLanguages } from "../languages/profiles";
 
 export type IntentResolutionResult =
   | { kind: "patch"; patch: JsonPatchOp[]; merged: SpecDraft; output: IntentResolutionOutput }
@@ -14,7 +15,8 @@ export type IntentResolutionResult =
   | { kind: "error"; error: string };
 
 const CODEX_MODEL = process.env.CODEX_MODEL ?? "gpt-4.1";
-const SUPPORTED_LANGUAGES = ActivityLanguageSchema.options.join(", ");
+const CONTRACT_LANGUAGES = ActivityLanguageSchema.options.join(", ");
+const SELECTABLE_LANGUAGES = listAgentSelectableLanguages().join(", ");
 
 const IntentResolutionSchema = z
   .object({
@@ -58,6 +60,13 @@ const IntentResolutionSchema = z
 export type IntentResolutionOutput = z.infer<typeof IntentResolutionSchema>;
 
 function buildSystemPrompt(): string {
+  const languageProfiles = Object.values(LANGUAGE_PROFILES)
+    .map((p) => {
+      const avail = p.support.generation && p.support.judge ? "available" : "not available yet";
+      return `- ${p.language}: runtime=${p.runtime}, tests=${p.testFramework}, constraints="${p.defaultConstraints}" (${avail})`;
+    })
+    .join("\n");
+
   return `
 You are Codemm's intent resolver.
 
@@ -68,14 +77,19 @@ Your job:
 
 Hard rules:
 - Return ONLY valid JSON (no markdown, no code fences, no prose).
-- Supported languages right now: ${SUPPORTED_LANGUAGES}. Never invent unsupported languages. If user asks for another language, ask a clarification question instead.
+- ActivitySpec contract languages: ${CONTRACT_LANGUAGES}.
+- Product-supported (selectable) languages right now: ${SELECTABLE_LANGUAGES || "java"}.
+- If the user asks for a language that is not selectable yet, ask a clarificationQuestion to switch to a selectable language (do NOT set language to an unavailable value).
 - Do not output constraints or test_case_count; those are system invariants.
 - If your inference is uncertain, either set a low confidence score or ask a clarificationQuestion.
 - Do not "force" a patch that contradicts the user's explicit statement.
 
 Current system invariants (non-negotiable):
-- constraints must be exactly "${CODEMM_DEFAULT_CONSTRAINTS}"
-- test_case_count must be 8
+- constraints are language-dependent and must match the active language profile exactly.
+- test_case_count must be ${CODEMM_DEFAULT_TEST_CASE_COUNT}
+
+Language profiles:
+${languageProfiles}
 `.trim();
 }
 
@@ -93,7 +107,7 @@ ${JSON.stringify(args.currentSpec)}
 Output JSON schema:
 {
   "inferredPatch": {
-    "language"?: "java",
+    "language"?: "java" | "python",
     "problem_count"?: number,
     "difficulty_plan"?: [{"difficulty":"easy|medium|hard","count":number}, ...],
     "topic_tags"?: string[],
