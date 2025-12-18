@@ -8,10 +8,12 @@ export type ExecutionResult = {
 export type ExecutionRequest = {
     kind: "code";
     code: string;
+    stdin?: string;
 } | {
     kind: "files";
     files: Record<string, string>;
     mainClass?: string;
+    stdin?: string;
 };
 export type JudgeRequest = {
     kind: "code";

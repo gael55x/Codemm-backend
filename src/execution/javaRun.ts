@@ -30,6 +30,14 @@ export type RunResult = {
 
 export type JavaFiles = Record<string, string>;
 
+function assertSafeJavaMainClassName(mainClass: string): string {
+  const trimmed = mainClass.trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) {
+    throw new Error(`Invalid mainClass "${mainClass}".`);
+  }
+  return trimmed;
+}
+
 function hasJavaMainMethod(source: string): boolean {
   const withoutBlockComments = source.replace(/\/\*[\s\S]*?\*\//g, "");
   const withoutLineComments = withoutBlockComments.replace(/\/\/.*$/gm, "");
@@ -47,7 +55,11 @@ function inferMainClassFromFiles(files: JavaFiles): string | null {
   return null;
 }
 
-export async function runJavaFiles(opts: { files: JavaFiles; mainClass?: string }): Promise<RunResult> {
+export async function runJavaFiles(opts: {
+  files: JavaFiles;
+  mainClass?: string;
+  stdin?: string;
+}): Promise<RunResult> {
   const tmp = mkdtempSync(join(tmpdir(), "codem-run-"));
 
   try {
@@ -55,7 +67,8 @@ export async function runJavaFiles(opts: { files: JavaFiles; mainClass?: string 
       writeFileSync(join(tmp, filename), source, "utf8");
     }
 
-    const mainClass = opts.mainClass ?? inferMainClassFromFiles(opts.files);
+    const inferred = opts.mainClass ?? inferMainClassFromFiles(opts.files);
+    const mainClass = inferred ? assertSafeJavaMainClassName(inferred) : null;
     if (!mainClass) {
       return {
         stdout: "",
@@ -64,13 +77,20 @@ export async function runJavaFiles(opts: { files: JavaFiles; mainClass?: string 
       };
     }
 
+    const hasStdin = typeof opts.stdin === "string";
+    if (hasStdin) {
+      writeFileSync(join(tmp, "stdin.txt"), opts.stdin ?? "", "utf8");
+    }
+
+    const runCmd = hasStdin ? `java ${mainClass} < stdin.txt` : `java ${mainClass}`;
+
     // Reuse the existing judge image, but override ENTRYPOINT so it doesn't run JUnit.
     const dockerCmd = [
       "docker run --rm",
       `-v ${tmp}:/workspace`,
       "--entrypoint /bin/bash",
       "codem-java-judge",
-      `-lc "javac *.java && java ${mainClass}"`,
+      `-lc "javac *.java && ${runCmd}"`,
     ].join(" ");
 
     const { stdout, stderr } = await execAsync(dockerCmd, tmp);
@@ -92,7 +112,14 @@ export async function runJavaFiles(opts: { files: JavaFiles; mainClass?: string 
  * - No persistence
  * - Uses the existing codem-java-judge image but overrides entrypoint
  */
-export async function runJavaCodeOnly(userCode: string): Promise<RunResult> {
+export async function runJavaCodeOnly(userCode: string, stdin?: string): Promise<RunResult> {
   const userClassName = inferClassName(userCode, "Solution");
-  return runJavaFiles({ files: { [`${userClassName}.java`]: userCode }, mainClass: userClassName });
+  const opts: { files: JavaFiles; mainClass: string; stdin?: string } = {
+    files: { [`${userClassName}.java`]: userCode },
+    mainClass: userClassName,
+  };
+  if (typeof stdin === "string") {
+    opts.stdin = stdin;
+  }
+  return runJavaFiles(opts);
 }

@@ -28,6 +28,8 @@ Usage:
 Options:
   --trace                 Sets CODEMM_TRACE=1
   --no-trace              Sets CODEMM_TRACE=0
+  --workspace-gen         Sets CODEMM_WORKSPACE_GEN=1 (generate workspace-style problems for easy Java slots)
+  --no-workspace-gen      Sets CODEMM_WORKSPACE_GEN=0
   --port <number>         Sets PORT (default: 4000)
   --rebuild-judge         Rebuild codem-java-judge image (same as REBUILD_JUDGE=1)
   --no-build              Skip TypeScript build step
@@ -43,6 +45,7 @@ EOF
 
 agent_mode="${CODEMM_AGENT_MODE:-dynamic}"
 trace_flag="${CODEMM_TRACE:-}"
+workspace_gen_flag="${CODEMM_WORKSPACE_GEN:-}"
 port_override="${PORT:-}"
 rebuild_judge="${REBUILD_JUDGE:-0}"
 do_build="1"
@@ -64,6 +67,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-trace)
       trace_flag="0"
+      shift
+      ;;
+    --workspace-gen)
+      workspace_gen_flag="1"
+      shift
+      ;;
+    --no-workspace-gen)
+      workspace_gen_flag="0"
       shift
       ;;
     --port)
@@ -107,6 +118,9 @@ export CODEMM_AGENT_MODE="${agent_mode}"
 
 if [[ -n "${trace_flag}" ]]; then
   export CODEMM_TRACE="${trace_flag}"
+fi
+if [[ -n "${workspace_gen_flag}" ]]; then
+  export CODEMM_WORKSPACE_GEN="${workspace_gen_flag}"
 fi
 if [[ -n "${port_override}" ]]; then
   export PORT="${port_override}"
@@ -152,6 +166,9 @@ if [[ -n "${CODEMM_AGENT_MODE:-}" ]]; then
 fi
 if [[ -n "${CODEMM_TRACE:-}" ]]; then
   echo "CODEMM_TRACE=${CODEMM_TRACE}"
+fi
+if [[ -n "${CODEMM_WORKSPACE_GEN:-}" ]]; then
+  echo "CODEMM_WORKSPACE_GEN=${CODEMM_WORKSPACE_GEN}"
 fi
 echo "Press Ctrl+C to stop."
 echo

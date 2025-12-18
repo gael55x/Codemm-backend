@@ -6,13 +6,18 @@ const judge_1 = require("../judge");
 exports.javaExecutionAdapter = {
     run: async (req) => {
         if (req.kind === "files") {
-            const opts = { files: req.files };
+            const opts = {
+                files: req.files,
+            };
             if (typeof req.mainClass === "string" && req.mainClass.trim()) {
                 opts.mainClass = req.mainClass.trim();
             }
+            if (typeof req.stdin === "string") {
+                opts.stdin = req.stdin;
+            }
             return (0, javaRun_1.runJavaFiles)(opts);
         }
-        return (0, javaRun_1.runJavaCodeOnly)(req.code);
+        return (0, javaRun_1.runJavaCodeOnly)(req.code, req.stdin);
     },
 };
 exports.javaJudgeAdapter = {

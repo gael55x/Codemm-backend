@@ -26,7 +26,7 @@ app.use("/sessions", sessions_1.sessionsRouter);
 // Terminal-style execution: code only, no tests, no persistence, no auth required.
 app.post("/run", async (req, res) => {
     try {
-        const { code, language, files, mainClass } = req.body ?? {};
+        const { code, language, files, mainClass, stdin } = req.body ?? {};
         const langParsed = activitySpec_1.ActivityLanguageSchema.safeParse(language);
         if (!langParsed.success) {
             return res.status(400).json({ error: "Invalid language." });
@@ -40,8 +40,21 @@ app.post("/run", async (req, res) => {
             return res.status(400).json({ error: `No execution adapter configured for "${lang}".` });
         }
         const maxTotalCodeLength = 200000; // 200KB
+        const maxStdinLength = 50000; // 50KB
         const maxFileCount = 12;
         const filenamePattern = /^[A-Za-z_][A-Za-z0-9_]*\.java$/;
+        let safeStdin = undefined;
+        if (typeof stdin !== "undefined") {
+            if (typeof stdin !== "string") {
+                return res.status(400).json({ error: "stdin must be a string." });
+            }
+            if (stdin.length > maxStdinLength) {
+                return res
+                    .status(400)
+                    .json({ error: `stdin exceeds maximum length of ${maxStdinLength} characters.` });
+            }
+            safeStdin = stdin;
+        }
         if (files && typeof files === "object") {
             const entries = Object.entries(files);
             if (entries.length === 0) {
@@ -50,7 +63,7 @@ app.post("/run", async (req, res) => {
             if (entries.length > maxFileCount) {
                 return res.status(400).json({ error: `Too many files. Max is ${maxFileCount}.` });
             }
-            let totalLen = 0;
+            let totalLen = safeStdin?.length ?? 0;
             const safeFiles = {};
             for (const [filename, source] of entries) {
                 if (typeof filename !== "string" || !filenamePattern.test(filename)) {
@@ -76,18 +89,26 @@ app.post("/run", async (req, res) => {
             if (typeof mainClass === "string" && mainClass.trim()) {
                 execReq.mainClass = mainClass.trim();
             }
+            if (typeof safeStdin === "string") {
+                execReq.stdin = safeStdin;
+            }
             const result = await profile.executionAdapter.run(execReq);
             return res.json({ stdout: result.stdout, stderr: result.stderr });
         }
         if (typeof code !== "string" || !code.trim()) {
             return res.status(400).json({ error: "Provide either code (string) or files (object)." });
         }
-        if (code.length > maxTotalCodeLength) {
+        const total = code.length + (safeStdin?.length ?? 0);
+        if (total > maxTotalCodeLength) {
             return res.status(400).json({
                 error: `Code exceeds maximum length of ${maxTotalCodeLength} characters.`,
             });
         }
-        const result = await profile.executionAdapter.run({ kind: "code", code });
+        const execReq = { kind: "code", code };
+        if (typeof safeStdin === "string") {
+            execReq.stdin = safeStdin;
+        }
+        const result = await profile.executionAdapter.run(execReq);
         res.json({ stdout: result.stdout, stderr: result.stderr });
     }
     catch (err) {

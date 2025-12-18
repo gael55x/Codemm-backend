@@ -5,8 +5,8 @@ export type LanguageId = "java" | "python";
 
 export type ExecutionResult = { stdout: string; stderr: string };
 export type ExecutionRequest =
-  | { kind: "code"; code: string }
-  | { kind: "files"; files: Record<string, string>; mainClass?: string };
+  | { kind: "code"; code: string; stdin?: string }
+  | { kind: "files"; files: Record<string, string>; mainClass?: string; stdin?: string };
 
 export type JudgeRequest =
   | { kind: "code"; code: string; testSuite: string }

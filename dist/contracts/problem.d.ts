@@ -12,7 +12,7 @@ export declare const WorkspaceFileSchema: z.ZodObject<{
     role: "entry" | "support" | "readonly";
     content: string;
 }>;
-export declare const WorkspaceSchema: z.ZodObject<{
+export declare const WorkspaceSchema: z.ZodEffects<z.ZodObject<{
     files: z.ZodArray<z.ZodObject<{
         path: z.ZodString;
         role: z.ZodEnum<["entry", "support", "readonly"]>;
@@ -28,6 +28,20 @@ export declare const WorkspaceSchema: z.ZodObject<{
     }>, "many">;
     entrypoint: z.ZodOptional<z.ZodString>;
 }, "strict", z.ZodTypeAny, {
+    files: {
+        path: string;
+        role: "entry" | "support" | "readonly";
+        content: string;
+    }[];
+    entrypoint?: string | undefined;
+}, {
+    files: {
+        path: string;
+        role: "entry" | "support" | "readonly";
+        content: string;
+    }[];
+    entrypoint?: string | undefined;
+}>, {
     files: {
         path: string;
         role: "entry" | "support" | "readonly";
@@ -79,7 +93,7 @@ export declare const GeneratedProblemDraftSchema: z.ZodUnion<[z.ZodObject<{
     topic_tag: string;
     starter_code: string;
     reference_solution: string;
-}>, z.ZodObject<{
+}>, z.ZodEffects<z.ZodObject<{
     id: z.ZodString;
     title: z.ZodString;
     description: z.ZodString;
@@ -90,7 +104,7 @@ export declare const GeneratedProblemDraftSchema: z.ZodUnion<[z.ZodObject<{
     difficulty: z.ZodEnum<["easy", "medium", "hard"]>;
     topic_tag: z.ZodString;
 } & {
-    workspace: z.ZodObject<{
+    workspace: z.ZodEffects<z.ZodObject<{
         files: z.ZodArray<z.ZodObject<{
             path: z.ZodString;
             role: z.ZodEnum<["entry", "support", "readonly"]>;
@@ -119,8 +133,22 @@ export declare const GeneratedProblemDraftSchema: z.ZodUnion<[z.ZodObject<{
             content: string;
         }[];
         entrypoint?: string | undefined;
+    }>, {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    }, {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
     }>;
-    reference_workspace: z.ZodObject<{
+    reference_workspace: z.ZodEffects<z.ZodObject<{
         files: z.ZodArray<z.ZodObject<{
             path: z.ZodString;
             role: z.ZodEnum<["entry", "support", "readonly"]>;
@@ -136,6 +164,20 @@ export declare const GeneratedProblemDraftSchema: z.ZodUnion<[z.ZodObject<{
         }>, "many">;
         entrypoint: z.ZodOptional<z.ZodString>;
     }, "strict", z.ZodTypeAny, {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    }, {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    }>, {
         files: {
             path: string;
             role: "entry" | "support" | "readonly";
@@ -151,6 +193,58 @@ export declare const GeneratedProblemDraftSchema: z.ZodUnion<[z.ZodObject<{
         entrypoint?: string | undefined;
     }>;
 }, "strict", z.ZodTypeAny, {
+    id: string;
+    difficulty: "easy" | "medium" | "hard";
+    constraints: string;
+    title: string;
+    description: string;
+    test_suite: string;
+    sample_inputs: string[];
+    sample_outputs: string[];
+    topic_tag: string;
+    workspace: {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    };
+    reference_workspace: {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    };
+}, {
+    id: string;
+    difficulty: "easy" | "medium" | "hard";
+    constraints: string;
+    title: string;
+    description: string;
+    test_suite: string;
+    sample_inputs: string[];
+    sample_outputs: string[];
+    topic_tag: string;
+    workspace: {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    };
+    reference_workspace: {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    };
+}>, {
     id: string;
     difficulty: "easy" | "medium" | "hard";
     constraints: string;
@@ -242,7 +336,7 @@ export declare const GeneratedProblemSchema: z.ZodUnion<[z.ZodObject<Omit<{
     sample_outputs: string[];
     topic_tag: string;
     starter_code: string;
-}>, z.ZodObject<Omit<{
+}>, z.ZodEffects<z.ZodObject<Omit<{
     id: z.ZodString;
     title: z.ZodString;
     description: z.ZodString;
@@ -253,7 +347,7 @@ export declare const GeneratedProblemSchema: z.ZodUnion<[z.ZodObject<Omit<{
     difficulty: z.ZodEnum<["easy", "medium", "hard"]>;
     topic_tag: z.ZodString;
 } & {
-    workspace: z.ZodObject<{
+    workspace: z.ZodEffects<z.ZodObject<{
         files: z.ZodArray<z.ZodObject<{
             path: z.ZodString;
             role: z.ZodEnum<["entry", "support", "readonly"]>;
@@ -282,8 +376,22 @@ export declare const GeneratedProblemSchema: z.ZodUnion<[z.ZodObject<Omit<{
             content: string;
         }[];
         entrypoint?: string | undefined;
+    }>, {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    }, {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
     }>;
-    reference_workspace: z.ZodObject<{
+    reference_workspace: z.ZodEffects<z.ZodObject<{
         files: z.ZodArray<z.ZodObject<{
             path: z.ZodString;
             role: z.ZodEnum<["entry", "support", "readonly"]>;
@@ -299,6 +407,20 @@ export declare const GeneratedProblemSchema: z.ZodUnion<[z.ZodObject<Omit<{
         }>, "many">;
         entrypoint: z.ZodOptional<z.ZodString>;
     }, "strict", z.ZodTypeAny, {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    }, {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    }>, {
         files: {
             path: string;
             role: "entry" | "support" | "readonly";
@@ -314,6 +436,42 @@ export declare const GeneratedProblemSchema: z.ZodUnion<[z.ZodObject<Omit<{
         entrypoint?: string | undefined;
     }>;
 }, "reference_workspace">, "strict", z.ZodTypeAny, {
+    id: string;
+    difficulty: "easy" | "medium" | "hard";
+    constraints: string;
+    title: string;
+    description: string;
+    test_suite: string;
+    sample_inputs: string[];
+    sample_outputs: string[];
+    topic_tag: string;
+    workspace: {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    };
+}, {
+    id: string;
+    difficulty: "easy" | "medium" | "hard";
+    constraints: string;
+    title: string;
+    description: string;
+    test_suite: string;
+    sample_inputs: string[];
+    sample_outputs: string[];
+    topic_tag: string;
+    workspace: {
+        files: {
+            path: string;
+            role: "entry" | "support" | "readonly";
+            content: string;
+        }[];
+        entrypoint?: string | undefined;
+    };
+}>, {
     id: string;
     difficulty: "easy" | "medium" | "hard";
     constraints: string;
