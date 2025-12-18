@@ -8,6 +8,33 @@ const os_1 = require("os");
 const path_1 = require("path");
 const trace_1 = require("./utils/trace");
 const JUDGE_TIMEOUT_MS = Number.parseInt(process.env.JUDGE_TIMEOUT_MS ?? "8000", 10);
+function stripAnsi(text) {
+    return text.replace(/\u001b\[[0-9;]*m/g, "");
+}
+function parseJUnitTree(stdout) {
+    const clean = stripAnsi(stdout);
+    const passed = [];
+    const failed = [];
+    const seen = new Set();
+    for (const line of clean.split(/\r?\n/)) {
+        // Example:
+        // |   +-- testNamesWithNumbers() [OK]
+        // |   +-- testNamesWithSpaces() [X] expected: <...>
+        const m = line.match(/\b([A-Za-z_][A-Za-z0-9_]*)\(\)\s+\[(OK|X)\]\b/);
+        if (!m)
+            continue;
+        const name = m[1];
+        const status = m[2];
+        if (seen.has(`${name}:${status}`))
+            continue;
+        seen.add(`${name}:${status}`);
+        if (status === "OK")
+            passed.push(name);
+        if (status === "X")
+            failed.push(name);
+    }
+    return { passed, failed };
+}
 function execAsync(command, cwd) {
     return new Promise((resolve, reject) => {
         (0, child_process_1.exec)(command, {
@@ -48,11 +75,11 @@ async function runJudge(userCode, testSuite) {
         const { stdout, stderr, exitCode, timedOut } = await execAsync(dockerCmd, tmp);
         (0, trace_1.trace)("judge.result", { exitCode, timedOut, stdoutLen: stdout.length, stderrLen: stderr.length });
         const executionTimeMs = Date.now() - start;
-        // TODO: parse stdout/stderr to determine passed/failed test names.
+        const { passed, failed } = parseJUnitTree(stdout);
         return {
             success: exitCode === 0,
-            passedTests: [],
-            failedTests: [],
+            passedTests: passed,
+            failedTests: failed,
             stdout,
             stderr,
             executionTimeMs,
@@ -104,10 +131,11 @@ async function runJudgeFiles(userFiles, testSuite) {
         const { stdout, stderr, exitCode, timedOut } = await execAsync(dockerCmd, tmp);
         (0, trace_1.trace)("judge.result", { exitCode, timedOut, stdoutLen: stdout.length, stderrLen: stderr.length });
         const executionTimeMs = Date.now() - start;
+        const { passed, failed } = parseJUnitTree(stdout);
         return {
             success: exitCode === 0,
-            passedTests: [],
-            failedTests: [],
+            passedTests: passed,
+            failedTests: failed,
             stdout,
             stderr,
             executionTimeMs,
