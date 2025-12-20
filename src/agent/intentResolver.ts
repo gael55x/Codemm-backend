@@ -5,7 +5,7 @@ import { createCodexCompletion } from "../infra/llm/codex";
 import { tryParseJson } from "../utils/jsonParser";
 import { trace, traceText } from "../utils/trace";
 import { applyJsonPatch, type JsonPatchOp } from "../compiler/jsonPatch";
-import { ActivitySpecDraftSchema, type SpecDraft, validatePatchedSpecOrError } from "../compiler/specDraft";
+import { ActivitySpecDraftSchema, ensureFixedFields, type SpecDraft, validatePatchedSpecOrError } from "../compiler/specDraft";
 import { LANGUAGE_PROFILES, listAgentSelectableLanguages } from "../languages/profiles";
 import { type DialogueRevision, USER_EDITABLE_SPEC_KEYS, type UserEditableSpecKey } from "./dialogue";
 
@@ -83,6 +83,22 @@ function wantsTopicDominance(userMessage: string): boolean {
     msg.includes("primarily") ||
     msg.includes("primarily on")
   );
+}
+
+function extractExplicitLanguage(userMessage: string): "java" | "python" | null {
+  const msg = userMessage.toLowerCase();
+  if (/\bpython\b/.test(msg)) return "python";
+  if (/\bjava\b/.test(msg)) return "java";
+  return null;
+}
+
+function isLanguageSwitchConfirmed(userMessage: string): boolean {
+  const msg = userMessage.trim().toLowerCase();
+  if (msg === "python" || msg === "java") return true;
+  // Require both a confirmation-ish phrase and an explicit language mention.
+  const hasConfirmWord = /\b(yes|yep|sure|ok|okay|confirm|proceed|switch|change|use|go with)\b/.test(msg);
+  const hasLanguage = /\b(python|java)\b/.test(msg);
+  return hasConfirmWord && hasLanguage;
 }
 
 function applyTopicDominanceHeuristic(
@@ -268,7 +284,51 @@ export async function resolveIntentWithLLM(args: {
       return { kind: "error", error: "Intent resolver returned invalid JSON." };
     }
 
-    const output = applyTopicDominanceHeuristic(args.currentSpec, userMessage, out.data);
+    let output = applyTopicDominanceHeuristic(args.currentSpec, userMessage, out.data);
+
+    // Language selection gate:
+    // - Never silently switch languages.
+    // - If user explicitly requests a language switch, require confirmation.
+    // - If user doesn't mention language and none is set, default to Java.
+    const explicitLanguage = extractExplicitLanguage(userMessage);
+    const currentLanguage = args.currentSpec.language;
+    const inferredLanguage = output.inferredPatch.language;
+
+    if (explicitLanguage) {
+      const isSwitch = currentLanguage != null && explicitLanguage !== currentLanguage;
+      if (isSwitch && !isLanguageSwitchConfirmed(userMessage)) {
+        return {
+          kind: "clarify",
+          question: `I can generate this in ${explicitLanguage.toUpperCase()}. Want to proceed with ${explicitLanguage.toUpperCase()}, or stick with ${currentLanguage.toUpperCase()}? Reply "${explicitLanguage}" to switch or "${currentLanguage}" to keep it.`,
+          output,
+        };
+      }
+
+      output = {
+        ...output,
+        inferredPatch: { ...output.inferredPatch, language: explicitLanguage },
+        confidence: { ...output.confidence, language: 1 },
+      };
+    } else {
+      // Drop any model-inferred language changes unless the user explicitly mentioned it.
+      if (typeof inferredLanguage === "string") {
+        const nextConfidence = { ...output.confidence };
+        delete (nextConfidence as any).language;
+        const nextPatch = { ...output.inferredPatch };
+        delete (nextPatch as any).language;
+        output = { ...output, inferredPatch: nextPatch as any, confidence: nextConfidence };
+      }
+
+      // Default language to Java when missing and user didn't specify.
+      if (!currentLanguage) {
+        output = {
+          ...output,
+          inferredPatch: { ...output.inferredPatch, language: "java" },
+          confidence: { ...output.confidence, language: 1 },
+          rationale: `${output.rationale} Defaulting language to Java unless specified.`,
+        };
+      }
+    }
 
     // Convert inferredPatch to JSON Patch ops and validate against draft contract.
     const patch = toTopLevelPatch(args.currentSpec, output.inferredPatch);
@@ -288,11 +348,16 @@ export async function resolveIntentWithLLM(args: {
 
     const invalidationPatch = invalidates.length > 0 ? buildInvalidationPatch(args.currentSpec, invalidates) : [];
     const merged = applyJsonPatch(args.currentSpec as any, [...patch, ...invalidationPatch]) as SpecDraft;
-    const contractError = validatePatchedSpecOrError(merged);
+
+    // Re-apply fixed invariants after patching (e.g. constraints must match language).
+    const fixedAfter = ensureFixedFields(merged);
+    const finalMerged = fixedAfter.length > 0 ? (applyJsonPatch(merged as any, fixedAfter) as SpecDraft) : merged;
+
+    const contractError = validatePatchedSpecOrError(finalMerged);
     if (contractError) {
       trace("agent.intentResolver.contract_reject", {
         error: contractError,
-        patchOps: [...patch, ...invalidationPatch].map((p) => p.path),
+        patchOps: [...patch, ...invalidationPatch, ...fixedAfter].map((p) => p.path),
       });
       const clarification =
         output.clarificationQuestion ??
@@ -301,7 +366,7 @@ export async function resolveIntentWithLLM(args: {
     }
 
     // Safety: ensure we only keep keys that the draft schema allows.
-    const finalDraftCheck = ActivitySpecDraftSchema.safeParse(merged);
+    const finalDraftCheck = ActivitySpecDraftSchema.safeParse(finalMerged);
     if (!finalDraftCheck.success) {
       trace("agent.intentResolver.draft_schema_reject", { error: finalDraftCheck.error.issues[0]?.message ?? "draft invalid" });
       return { kind: "error", error: "Inferred patch failed draft validation." };
@@ -316,7 +381,7 @@ export async function resolveIntentWithLLM(args: {
       nextOutput = { ...output, revision: nextRevision as any };
     }
 
-    return { kind: "patch", patch: [...patch, ...invalidationPatch], merged, output: nextOutput };
+    return { kind: "patch", patch: [...patch, ...invalidationPatch, ...fixedAfter], merged: finalMerged, output: nextOutput };
   } catch (err: any) {
     trace("agent.intentResolver.exception", { error: err?.message ?? String(err) });
     return { kind: "error", error: err?.message ?? "Intent resolver failed." };
