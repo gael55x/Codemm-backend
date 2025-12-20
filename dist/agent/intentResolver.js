@@ -70,6 +70,23 @@ function wantsTopicDominance(userMessage) {
         msg.includes("primarily") ||
         msg.includes("primarily on"));
 }
+function extractExplicitLanguage(userMessage) {
+    const msg = userMessage.toLowerCase();
+    if (/\bpython\b/.test(msg))
+        return "python";
+    if (/\bjava\b/.test(msg))
+        return "java";
+    return null;
+}
+function isLanguageSwitchConfirmed(userMessage) {
+    const msg = userMessage.trim().toLowerCase();
+    if (msg === "python" || msg === "java")
+        return true;
+    // Require both a confirmation-ish phrase and an explicit language mention.
+    const hasConfirmWord = /\b(yes|yep|sure|ok|okay|confirm|proceed|switch|change|use|go with)\b/.test(msg);
+    const hasLanguage = /\b(python|java)\b/.test(msg);
+    return hasConfirmWord && hasLanguage;
+}
 function applyTopicDominanceHeuristic(currentSpec, userMessage, output) {
     if (!wantsTopicDominance(userMessage))
         return output;
@@ -227,7 +244,48 @@ async function resolveIntentWithLLM(args) {
             (0, trace_1.trace)("agent.intentResolver.invalid_json", { error: out.error.issues[0]?.message ?? "schema validation failed" });
             return { kind: "error", error: "Intent resolver returned invalid JSON." };
         }
-        const output = applyTopicDominanceHeuristic(args.currentSpec, userMessage, out.data);
+        let output = applyTopicDominanceHeuristic(args.currentSpec, userMessage, out.data);
+        // Language selection gate:
+        // - Never silently switch languages.
+        // - If user explicitly requests a language switch, require confirmation.
+        // - If user doesn't mention language and none is set, default to Java.
+        const explicitLanguage = extractExplicitLanguage(userMessage);
+        const currentLanguage = args.currentSpec.language;
+        const inferredLanguage = output.inferredPatch.language;
+        if (explicitLanguage) {
+            const isSwitch = currentLanguage != null && explicitLanguage !== currentLanguage;
+            if (isSwitch && !isLanguageSwitchConfirmed(userMessage)) {
+                return {
+                    kind: "clarify",
+                    question: `I can generate this in ${explicitLanguage.toUpperCase()}. Want to proceed with ${explicitLanguage.toUpperCase()}, or stick with ${currentLanguage.toUpperCase()}? Reply "${explicitLanguage}" to switch or "${currentLanguage}" to keep it.`,
+                    output,
+                };
+            }
+            output = {
+                ...output,
+                inferredPatch: { ...output.inferredPatch, language: explicitLanguage },
+                confidence: { ...output.confidence, language: 1 },
+            };
+        }
+        else {
+            // Drop any model-inferred language changes unless the user explicitly mentioned it.
+            if (typeof inferredLanguage === "string") {
+                const nextConfidence = { ...output.confidence };
+                delete nextConfidence.language;
+                const nextPatch = { ...output.inferredPatch };
+                delete nextPatch.language;
+                output = { ...output, inferredPatch: nextPatch, confidence: nextConfidence };
+            }
+            // Default language to Java when missing and user didn't specify.
+            if (!currentLanguage) {
+                output = {
+                    ...output,
+                    inferredPatch: { ...output.inferredPatch, language: "java" },
+                    confidence: { ...output.confidence, language: 1 },
+                    rationale: `${output.rationale} Defaulting language to Java unless specified.`,
+                };
+            }
+        }
         // Convert inferredPatch to JSON Patch ops and validate against draft contract.
         const patch = toTopLevelPatch(args.currentSpec, output.inferredPatch);
         if (patch.length === 0) {
@@ -242,18 +300,21 @@ async function resolveIntentWithLLM(args) {
         const invalidates = uniqueKeys([...userInvalidates, ...autoInvalidates]);
         const invalidationPatch = invalidates.length > 0 ? buildInvalidationPatch(args.currentSpec, invalidates) : [];
         const merged = (0, jsonPatch_1.applyJsonPatch)(args.currentSpec, [...patch, ...invalidationPatch]);
-        const contractError = (0, specDraft_1.validatePatchedSpecOrError)(merged);
+        // Re-apply fixed invariants after patching (e.g. constraints must match language).
+        const fixedAfter = (0, specDraft_1.ensureFixedFields)(merged);
+        const finalMerged = fixedAfter.length > 0 ? (0, jsonPatch_1.applyJsonPatch)(merged, fixedAfter) : merged;
+        const contractError = (0, specDraft_1.validatePatchedSpecOrError)(finalMerged);
         if (contractError) {
             (0, trace_1.trace)("agent.intentResolver.contract_reject", {
                 error: contractError,
-                patchOps: [...patch, ...invalidationPatch].map((p) => p.path),
+                patchOps: [...patch, ...invalidationPatch, ...fixedAfter].map((p) => p.path),
             });
             const clarification = output.clarificationQuestion ??
                 `I might be misunderstanding. ${contractError} Can you rephrase what you want?`;
             return { kind: "clarify", question: clarification, output };
         }
         // Safety: ensure we only keep keys that the draft schema allows.
-        const finalDraftCheck = specDraft_1.ActivitySpecDraftSchema.safeParse(merged);
+        const finalDraftCheck = specDraft_1.ActivitySpecDraftSchema.safeParse(finalMerged);
         if (!finalDraftCheck.success) {
             (0, trace_1.trace)("agent.intentResolver.draft_schema_reject", { error: finalDraftCheck.error.issues[0]?.message ?? "draft invalid" });
             return { kind: "error", error: "Inferred patch failed draft validation." };
@@ -266,7 +327,7 @@ async function resolveIntentWithLLM(args) {
             };
             nextOutput = { ...output, revision: nextRevision };
         }
-        return { kind: "patch", patch: [...patch, ...invalidationPatch], merged, output: nextOutput };
+        return { kind: "patch", patch: [...patch, ...invalidationPatch, ...fixedAfter], merged: finalMerged, output: nextOutput };
     }
     catch (err) {
         (0, trace_1.trace)("agent.intentResolver.exception", { error: err?.message ?? String(err) });
