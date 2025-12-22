@@ -1,5 +1,6 @@
 import type { ProblemPlan } from "../planner/types";
 import type { GeneratedProblem, GeneratedProblemDraft } from "../contracts/problem";
+import type { GenerationOutcome } from "../contracts/generationOutcome";
 import { generateSingleProblem } from "./perSlotGenerator";
 import {
   ReferenceSolutionValidationError,
@@ -39,8 +40,9 @@ function discardReferenceArtifacts(draft: GeneratedProblemDraft): GeneratedProbl
 export async function generateProblemsFromPlan(
   plan: ProblemPlan,
   opts?: { onProgress?: (event: GenerationProgressEvent) => void }
-): Promise<GeneratedProblem[]> {
+): Promise<{ problems: GeneratedProblem[]; outcomes: GenerationOutcome[] }> {
   const problems: GeneratedProblem[] = [];
+  const outcomes: GenerationOutcome[] = [];
   const maxAttempts = 3;
   const onProgress = opts?.onProgress;
   const usedDomains: string[] = [];
@@ -186,6 +188,11 @@ export async function generateProblemsFromPlan(
               : /Invalid test_suite|schema validation|public class|Test suite class name/i.test(String(err?.message))
               ? "contract"
               : "unknown";
+          const failOutcome: GenerationOutcome = {
+            slotIndex: slot.index,
+            success: false,
+            retries: Math.max(0, maxAttempts - 1),
+          };
           throw new GenerationSlotFailureError(
             `Failed to generate slot ${slot.index} after ${maxAttempts} attempts. Last error: ${err.message}`,
             {
@@ -194,6 +201,7 @@ export async function generateProblemsFromPlan(
               attempts: maxAttempts,
               ...(typeof lastDraft?.title === "string" ? { title: lastDraft.title } : {}),
               ...(typeof lastLlmOutputHash === "string" ? { llmOutputHash: lastLlmOutputHash } : {}),
+              outcomesSoFar: [...outcomes, failOutcome],
             }
           );
         }
@@ -208,9 +216,10 @@ export async function generateProblemsFromPlan(
     }
 
     problems.push(problem);
+    outcomes.push({ slotIndex: slot.index, success: true, retries: Math.max(0, attempts - 1) });
     usedDomains.push(domainSeed);
     usedTitles.push(problem.title);
   }
 
-  return problems;
+  return { problems, outcomes };
 }

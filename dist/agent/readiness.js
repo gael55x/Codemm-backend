@@ -16,16 +16,18 @@ function getConfidence(confidence, key) {
         return 0;
     return Math.max(0, Math.min(1, raw));
 }
-function computeReadiness(spec, confidence) {
+function computeReadiness(spec, confidence, commitments) {
     const gaps = (0, specAnalysis_1.analyzeSpecGaps)(spec);
     const lowConfidenceFields = [];
     let minConfidence = 1;
     for (const [k, threshold] of Object.entries(exports.REQUIRED_CONFIDENCE)) {
         const key = k;
         const required = typeof threshold === "number" ? threshold : 0;
-        const c = getConfidence(confidence, key);
+        const locked = commitments?.[key]?.locked === true;
+        const committedConfidence = typeof commitments?.[key]?.confidence === "number" ? commitments[key].confidence : 0;
+        const c = locked ? Math.max(getConfidence(confidence, key), committedConfidence) : getConfidence(confidence, key);
         minConfidence = Math.min(minConfidence, c);
-        if (c < required) {
+        if (!locked && c < required) {
             lowConfidenceFields.push(key);
         }
     }

@@ -43,6 +43,8 @@ function initializeDatabase() {
       last_error TEXT,
       confidence_json TEXT,
       intent_trace_json TEXT,
+      commitments_json TEXT,
+      generation_outcomes_json TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -58,6 +60,12 @@ function initializeDatabase() {
     }
     if (!sessionColSet.has("intent_trace_json")) {
         db.exec(`ALTER TABLE sessions ADD COLUMN intent_trace_json TEXT`);
+    }
+    if (!sessionColSet.has("commitments_json")) {
+        db.exec(`ALTER TABLE sessions ADD COLUMN commitments_json TEXT`);
+    }
+    if (!sessionColSet.has("generation_outcomes_json")) {
+        db.exec(`ALTER TABLE sessions ADD COLUMN generation_outcomes_json TEXT`);
     }
     db.exec(`
     CREATE TABLE IF NOT EXISTS session_collectors (
@@ -199,9 +207,9 @@ exports.submissionDb = {
 // Codemm v1.0 Session operations (contract-driven)
 exports.sessionDb = {
     create: (id, state, specJson, userId) => {
-        const stmt = db.prepare(`INSERT INTO sessions (id, user_id, state, spec_json, confidence_json, intent_trace_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`);
-        stmt.run(id, userId ?? null, state, specJson, "{}", "[]");
+        const stmt = db.prepare(`INSERT INTO sessions (id, user_id, state, spec_json, confidence_json, intent_trace_json, commitments_json, generation_outcomes_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`);
+        stmt.run(id, userId ?? null, state, specJson, "{}", "[]", "[]", "[]");
     },
     findById: (id) => {
         const stmt = db.prepare(`SELECT * FROM sessions WHERE id = ?`);
@@ -238,6 +246,14 @@ exports.sessionDb = {
     updateIntentTraceJson: (id, traceJson) => {
         const stmt = db.prepare(`UPDATE sessions SET intent_trace_json = ?, updated_at = datetime('now') WHERE id = ?`);
         stmt.run(traceJson, id);
+    },
+    updateCommitmentsJson: (id, commitmentsJson) => {
+        const stmt = db.prepare(`UPDATE sessions SET commitments_json = ?, updated_at = datetime('now') WHERE id = ?`);
+        stmt.run(commitmentsJson, id);
+    },
+    updateGenerationOutcomesJson: (id, outcomesJson) => {
+        const stmt = db.prepare(`UPDATE sessions SET generation_outcomes_json = ?, updated_at = datetime('now') WHERE id = ?`);
+        stmt.run(outcomesJson, id);
     },
 };
 exports.sessionCollectorDb = {

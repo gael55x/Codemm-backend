@@ -20,6 +20,7 @@ class GenerationSlotFailureError extends Error {
         this.attempts = opts.attempts;
         this.title = opts.title;
         this.llmOutputHash = opts.llmOutputHash;
+        this.outcomesSoFar = opts.outcomesSoFar;
     }
 }
 exports.GenerationSlotFailureError = GenerationSlotFailureError;

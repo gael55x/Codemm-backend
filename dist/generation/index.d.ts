@@ -1,5 +1,6 @@
 import type { ProblemPlan } from "../planner/types";
 import type { GeneratedProblem } from "../contracts/problem";
+import type { GenerationOutcome } from "../contracts/generationOutcome";
 import type { GenerationProgressEvent } from "../contracts/generationProgress";
 /**
  * Generate problems from a ProblemPlan using per-slot generation with isolated retries.
@@ -15,5 +16,8 @@ import type { GenerationProgressEvent } from "../contracts/generationProgress";
  */
 export declare function generateProblemsFromPlan(plan: ProblemPlan, opts?: {
     onProgress?: (event: GenerationProgressEvent) => void;
-}): Promise<GeneratedProblem[]>;
+}): Promise<{
+    problems: GeneratedProblem[];
+    outcomes: GenerationOutcome[];
+}>;
 //# sourceMappingURL=index.d.ts.map

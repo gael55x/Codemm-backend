@@ -154,6 +154,7 @@ sessionsRouter.post("/:id/messages", async (req, res) => {
         accepted: false,
         state: result.state,
         nextQuestion: result.nextQuestion,
+        questionKey: result.questionKey,
         done: false,
         error: result.error,
         spec: result.spec,
@@ -164,6 +165,7 @@ sessionsRouter.post("/:id/messages", async (req, res) => {
       accepted: true,
       state: result.state,
       nextQuestion: result.nextQuestion,
+      questionKey: result.questionKey,
       spec: result.spec,
       done: result.done,
     });
@@ -196,6 +198,8 @@ sessionsRouter.get("/:id", (req, res) => {
     messages: s.messages,
     collector: s.collector,
     confidence: s.confidence,
+    commitments: s.commitments,
+    generationOutcomes: s.generationOutcomes,
     intentTrace: s.intentTrace,
   });
 } catch (err: any) {

@@ -32,6 +32,7 @@ function discardReferenceArtifacts(draft) {
  */
 async function generateProblemsFromPlan(plan, opts) {
     const problems = [];
+    const outcomes = [];
     const maxAttempts = 3;
     const onProgress = opts?.onProgress;
     const usedDomains = [];
@@ -156,12 +157,18 @@ async function generateProblemsFromPlan(plan, opts) {
                             : /Invalid test_suite|schema validation|public class|Test suite class name/i.test(String(err?.message))
                                 ? "contract"
                                 : "unknown";
+                    const failOutcome = {
+                        slotIndex: slot.index,
+                        success: false,
+                        retries: Math.max(0, maxAttempts - 1),
+                    };
                     throw new errors_1.GenerationSlotFailureError(`Failed to generate slot ${slot.index} after ${maxAttempts} attempts. Last error: ${err.message}`, {
                         slotIndex: slot.index,
                         kind,
                         attempts: maxAttempts,
                         ...(typeof lastDraft?.title === "string" ? { title: lastDraft.title } : {}),
                         ...(typeof lastLlmOutputHash === "string" ? { llmOutputHash: lastLlmOutputHash } : {}),
+                        outcomesSoFar: [...outcomes, failOutcome],
                     });
                 }
                 // Retry
@@ -171,9 +178,10 @@ async function generateProblemsFromPlan(plan, opts) {
             throw new Error(`Failed to generate slot ${slot.index}. Last error: ${lastError?.message ?? "unknown"}`);
         }
         problems.push(problem);
+        outcomes.push({ slotIndex: slot.index, success: true, retries: Math.max(0, attempts - 1) });
         usedDomains.push(domainSeed);
         usedTitles.push(problem.title);
     }
-    return problems;
+    return { problems, outcomes };
 }
 //# sourceMappingURL=index.js.map

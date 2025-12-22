@@ -1,3 +1,5 @@
+import type { GenerationOutcome } from "../contracts/generationOutcome";
+
 export type GenerationFailureKind =
   | "compile"
   | "tests"
@@ -29,8 +31,19 @@ export class GenerationSlotFailureError extends Error {
   attempts: number;
   title: string | undefined;
   llmOutputHash: string | undefined;
+  outcomesSoFar: GenerationOutcome[] | undefined;
 
-  constructor(message: string, opts: { slotIndex: number; kind: GenerationFailureKind; attempts: number; title?: string; llmOutputHash?: string }) {
+  constructor(
+    message: string,
+    opts: {
+      slotIndex: number;
+      kind: GenerationFailureKind;
+      attempts: number;
+      title?: string;
+      llmOutputHash?: string;
+      outcomesSoFar?: GenerationOutcome[];
+    }
+  ) {
     super(message);
     this.name = "GenerationSlotFailureError";
     this.slotIndex = opts.slotIndex;
@@ -38,5 +51,6 @@ export class GenerationSlotFailureError extends Error {
     this.attempts = opts.attempts;
     this.title = opts.title;
     this.llmOutputHash = opts.llmOutputHash;
+    this.outcomesSoFar = opts.outcomesSoFar;
   }
 }

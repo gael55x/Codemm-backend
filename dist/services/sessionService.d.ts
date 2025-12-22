@@ -1,6 +1,8 @@
 import { type SessionState } from "../contracts/session";
 import { type JsonPatchOp } from "../compiler/jsonPatch";
 import type { GeneratedProblem } from "../contracts/problem";
+import type { GenerationOutcome } from "../contracts/generationOutcome";
+import { listCommitments } from "../agent/commitments";
 export type SessionRecord = {
     id: string;
     state: SessionState;
@@ -16,6 +18,8 @@ export type SessionRecord = {
         buffer: string[];
     };
     confidence: Record<string, number>;
+    commitments: ReturnType<typeof listCommitments>;
+    generationOutcomes: GenerationOutcome[];
     intentTrace: unknown[];
 };
 export declare function createSession(userId?: number | null): {
@@ -27,6 +31,7 @@ export type ProcessMessageResponse = {
     accepted: false;
     state: SessionState;
     nextQuestion: string;
+    questionKey: string | null;
     done: false;
     error: string;
     spec: Record<string, unknown>;
@@ -34,6 +39,7 @@ export type ProcessMessageResponse = {
     accepted: true;
     state: SessionState;
     nextQuestion: string;
+    questionKey: string | null;
     done: boolean;
     spec: Record<string, unknown>;
     patch: JsonPatchOp[];

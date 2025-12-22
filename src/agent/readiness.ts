@@ -1,6 +1,7 @@
 import type { ActivitySpec } from "../contracts/activitySpec";
 import type { SpecDraft } from "../compiler/specDraft";
 import { analyzeSpecGaps } from "./specAnalysis";
+import type { CommitmentStore } from "./commitments";
 
 export type ConfidenceMap = Record<string, number>;
 
@@ -27,7 +28,8 @@ function getConfidence(confidence: ConfidenceMap | null | undefined, key: keyof 
 
 export function computeReadiness(
   spec: SpecDraft,
-  confidence: ConfidenceMap | null | undefined
+  confidence: ConfidenceMap | null | undefined,
+  commitments?: CommitmentStore | null
 ): ReadinessResult {
   const gaps = analyzeSpecGaps(spec);
 
@@ -37,9 +39,11 @@ export function computeReadiness(
   for (const [k, threshold] of Object.entries(REQUIRED_CONFIDENCE)) {
     const key = k as keyof ActivitySpec;
     const required = typeof threshold === "number" ? threshold : 0;
-    const c = getConfidence(confidence, key);
+    const locked = commitments?.[key]?.locked === true;
+    const committedConfidence = typeof commitments?.[key]?.confidence === "number" ? commitments![key]!.confidence : 0;
+    const c = locked ? Math.max(getConfidence(confidence, key), committedConfidence) : getConfidence(confidence, key);
     minConfidence = Math.min(minConfidence, c);
-    if (c < required) {
+    if (!locked && c < required) {
       lowConfidenceFields.push(key);
     }
   }

@@ -41,6 +41,8 @@ export function initializeDatabase() {
       last_error TEXT,
       confidence_json TEXT,
       intent_trace_json TEXT,
+      commitments_json TEXT,
+      generation_outcomes_json TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -58,6 +60,12 @@ export function initializeDatabase() {
   }
   if (!sessionColSet.has("intent_trace_json")) {
     db.exec(`ALTER TABLE sessions ADD COLUMN intent_trace_json TEXT`);
+  }
+  if (!sessionColSet.has("commitments_json")) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN commitments_json TEXT`);
+  }
+  if (!sessionColSet.has("generation_outcomes_json")) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN generation_outcomes_json TEXT`);
   }
 
   db.exec(`
@@ -170,6 +178,8 @@ export interface DBSession {
   last_error?: string | null;
   confidence_json?: string | null;
   intent_trace_json?: string | null;
+  commitments_json?: string | null;
+  generation_outcomes_json?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -325,10 +335,10 @@ export const submissionDb = {
 export const sessionDb = {
   create: (id: string, state: string, specJson: string, userId?: number | null) => {
     const stmt = db.prepare(
-      `INSERT INTO sessions (id, user_id, state, spec_json, confidence_json, intent_trace_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+      `INSERT INTO sessions (id, user_id, state, spec_json, confidence_json, intent_trace_json, commitments_json, generation_outcomes_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     );
-    stmt.run(id, userId ?? null, state, specJson, "{}", "[]");
+    stmt.run(id, userId ?? null, state, specJson, "{}", "[]", "[]", "[]");
   },
 
   findById: (id: string): DBSession | undefined => {
@@ -390,6 +400,20 @@ export const sessionDb = {
       `UPDATE sessions SET intent_trace_json = ?, updated_at = datetime('now') WHERE id = ?`
     );
     stmt.run(traceJson, id);
+  },
+
+  updateCommitmentsJson: (id: string, commitmentsJson: string) => {
+    const stmt = db.prepare(
+      `UPDATE sessions SET commitments_json = ?, updated_at = datetime('now') WHERE id = ?`
+    );
+    stmt.run(commitmentsJson, id);
+  },
+
+  updateGenerationOutcomesJson: (id: string, outcomesJson: string) => {
+    const stmt = db.prepare(
+      `UPDATE sessions SET generation_outcomes_json = ?, updated_at = datetime('now') WHERE id = ?`
+    );
+    stmt.run(outcomesJson, id);
   },
 };
 
