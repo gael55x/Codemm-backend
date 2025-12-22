@@ -224,6 +224,57 @@ async function resolveIntentWithLLM(args) {
             output: { inferredPatch: {}, confidence: {}, rationale: "Empty message." },
         };
     }
+    // Deterministic language handling (do not rely on LLM JSON compliance):
+    // - Default to Java when language is missing and user didn't specify.
+    // - If user explicitly requests a language change, require confirmation.
+    const explicitLanguage = extractExplicitLanguage(userMessage);
+    const currentLanguage = args.currentSpec.language;
+    const effectiveCurrentLanguage = currentLanguage ?? "java";
+    const applyLanguagePatch = (language, rationale) => {
+        const output = {
+            inferredPatch: { language },
+            confidence: { language: 1 },
+            rationale,
+            ...(currentLanguage && currentLanguage !== language
+                ? { revision: { replaces: ["language"] } }
+                : {}),
+        };
+        const patch = toTopLevelPatch(args.currentSpec, output.inferredPatch);
+        const merged = (0, jsonPatch_1.applyJsonPatch)(args.currentSpec, patch);
+        const fixedAfter = (0, specDraft_1.ensureFixedFields)(merged);
+        const finalMerged = fixedAfter.length > 0 ? (0, jsonPatch_1.applyJsonPatch)(merged, fixedAfter) : merged;
+        const contractError = (0, specDraft_1.validatePatchedSpecOrError)(finalMerged);
+        if (contractError) {
+            return { kind: "error", error: contractError };
+        }
+        const finalDraftCheck = specDraft_1.ActivitySpecDraftSchema.safeParse(finalMerged);
+        if (!finalDraftCheck.success) {
+            return { kind: "error", error: "Language patch failed draft validation." };
+        }
+        return { kind: "patch", patch: [...patch, ...fixedAfter], merged: finalMerged, output };
+    };
+    if (explicitLanguage) {
+        const isSwitch = explicitLanguage !== effectiveCurrentLanguage;
+        if (isSwitch && !isLanguageSwitchConfirmed(userMessage)) {
+            return {
+                kind: "clarify",
+                question: `I can generate this in ${explicitLanguage.toUpperCase()}. Want to proceed with ${explicitLanguage.toUpperCase()}, or stick with ${effectiveCurrentLanguage.toUpperCase()}? Reply "${explicitLanguage}" to switch or "${effectiveCurrentLanguage}" to keep it.`,
+                output: { inferredPatch: {}, confidence: {}, rationale: "Needs language switch confirmation." },
+            };
+        }
+        // If the user explicitly said a supported language, accept immediately.
+        if (currentLanguage === explicitLanguage) {
+            return {
+                kind: "noop",
+                output: { inferredPatch: {}, confidence: { language: 1 }, rationale: `Language already set to ${explicitLanguage}.` },
+            };
+        }
+        return applyLanguagePatch(explicitLanguage, `User explicitly selected ${explicitLanguage}.`);
+    }
+    if (!currentLanguage) {
+        // Default language policy: if not explicitly mentioned, use Java.
+        return applyLanguagePatch("java", "No language specified; defaulting to java.");
+    }
     (0, trace_1.trace)("agent.intentResolver.start", { model: CODEX_MODEL });
     let rawText = "";
     try {
@@ -245,48 +296,6 @@ async function resolveIntentWithLLM(args) {
             return { kind: "error", error: "Intent resolver returned invalid JSON." };
         }
         let output = applyTopicDominanceHeuristic(args.currentSpec, userMessage, out.data);
-        // Language selection gate:
-        // - Never silently switch languages.
-        // - If user explicitly requests a language switch, require confirmation.
-        // - If user doesn't mention language and none is set, default to Java.
-        const explicitLanguage = extractExplicitLanguage(userMessage);
-        const currentLanguage = args.currentSpec.language;
-        const effectiveCurrentLanguage = currentLanguage ?? "java";
-        const inferredLanguage = output.inferredPatch.language;
-        if (explicitLanguage) {
-            const isSwitch = explicitLanguage !== effectiveCurrentLanguage;
-            if (isSwitch && !isLanguageSwitchConfirmed(userMessage)) {
-                return {
-                    kind: "clarify",
-                    question: `I can generate this in ${explicitLanguage.toUpperCase()}. Want to proceed with ${explicitLanguage.toUpperCase()}, or stick with ${effectiveCurrentLanguage.toUpperCase()}? Reply "${explicitLanguage}" to switch or "${effectiveCurrentLanguage}" to keep it.`,
-                    output,
-                };
-            }
-            output = {
-                ...output,
-                inferredPatch: { ...output.inferredPatch, language: explicitLanguage },
-                confidence: { ...output.confidence, language: 1 },
-            };
-        }
-        else {
-            // Drop any model-inferred language changes unless the user explicitly mentioned it.
-            if (typeof inferredLanguage === "string") {
-                const nextConfidence = { ...output.confidence };
-                delete nextConfidence.language;
-                const nextPatch = { ...output.inferredPatch };
-                delete nextPatch.language;
-                output = { ...output, inferredPatch: nextPatch, confidence: nextConfidence };
-            }
-            // Default language to Java when missing and user didn't specify.
-            if (!currentLanguage) {
-                output = {
-                    ...output,
-                    inferredPatch: { ...output.inferredPatch, language: "java" },
-                    confidence: { ...output.confidence, language: 1 },
-                    rationale: `${output.rationale} Defaulting language to Java unless specified.`,
-                };
-            }
-        }
         // Convert inferredPatch to JSON Patch ops and validate against draft contract.
         const patch = toTopLevelPatch(args.currentSpec, output.inferredPatch);
         if (patch.length === 0) {
