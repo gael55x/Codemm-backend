@@ -110,12 +110,13 @@ function generateNextPrompt(args) {
             const countChanged = args.dialogueUpdate?.changed.problem_count != null;
             return (preface +
                 `${countChanged ? `Since the count changed, ` : ""}how should we split the difficulty for ${count} problems?\n` +
-                `Example: easy:2, medium:2, hard:1`);
+                `Codemm requires at least 2 difficulty levels with count > 0, and the counts must sum to ${count}.\n` +
+                `Example: easy:${Math.max(1, count - 1)}, medium:1`);
         }
         return preface + "How hard should the problems be overall? (easy / medium / hard counts)";
     }
     if (nextGoal === "content") {
-        return preface + "What should the problems focus on?\nExample: encapsulation, inheritance, polymorphism";
+        return preface + "What should the problems focus on?\nExample: arrays, recursion, hash maps";
     }
     if (nextGoal === "checking") {
         return (preface +
