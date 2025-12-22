@@ -329,6 +329,43 @@ function filterInferredPatchByCommitments(args: {
   return next;
 }
 
+function isMixedDifficultyPlan(plan: Array<{ difficulty: string; count: number }>): boolean {
+  const nonZero = plan.filter((p) => typeof p?.count === "number" && Number.isFinite(p.count) && p.count > 0);
+  const uniq = new Set(nonZero.map((p) => p.difficulty));
+  return uniq.size >= 2;
+}
+
+function hasDuplicateDifficulty(plan: Array<{ difficulty: string; count: number }>): boolean {
+  const seen = new Set<string>();
+  for (const item of plan) {
+    const d = String((item as any).difficulty);
+    if (seen.has(d)) return true;
+    seen.add(d);
+  }
+  return false;
+}
+
+function sumPlanCounts(plan: Array<{ difficulty: string; count: number }>): number {
+  let sum = 0;
+  for (const item of plan) {
+    const n = (item as any).count;
+    if (typeof n === "number" && Number.isFinite(n)) sum += n;
+  }
+  return sum;
+}
+
+function buildDifficultyClarification(problemCount: number | null): string {
+  if (typeof problemCount === "number" && Number.isFinite(problemCount) && problemCount >= 2) {
+    const n = Math.floor(problemCount);
+    const easy = Math.max(1, n - 1);
+    return (
+      `Codemm requires a mixed difficulty plan (at least 2 difficulty levels with count > 0), and counts must sum to ${n}.\n` +
+      `Example: easy:${easy}, medium:1`
+    );
+  }
+  return `Codemm requires a mixed difficulty plan (at least 2 difficulty levels with count > 0).`;
+}
+
 function defaultClarificationForBlockingField(field: UserEditableSpecKey, currentSpec: SpecDraft): string {
   switch (field) {
     case "language": {
@@ -344,7 +381,7 @@ function defaultClarificationForBlockingField(field: UserEditableSpecKey, curren
         : "Should this be beginner-friendly, mixed, or interview-level?";
     }
     case "topic_tags":
-      return "What should the problems focus on?\nExample: encapsulation, inheritance, polymorphism";
+      return "What should the problems focus on?\nExample: arrays, recursion, hash maps";
     case "problem_style":
       return "How should solutions be checked? (stdout, return, or mixed)";
     default:
@@ -464,6 +501,30 @@ export async function resolveIntentWithLLM(args: {
         output,
       }),
     };
+
+    // Draft-safety precheck: if the LLM proposes an invalid difficulty_plan (not mixed / duplicates / wrong sum),
+    // drop it deterministically and let the dialogue ask for a valid split next.
+    if (Array.isArray(output.inferredPatch.difficulty_plan)) {
+      const plan = output.inferredPatch.difficulty_plan as any[];
+      const countRaw =
+        typeof output.inferredPatch.problem_count === "number"
+          ? output.inferredPatch.problem_count
+          : typeof args.currentSpec.problem_count === "number"
+            ? args.currentSpec.problem_count
+            : null;
+      const count = typeof countRaw === "number" && Number.isFinite(countRaw) ? Math.floor(countRaw) : null;
+      const sum = sumPlanCounts(plan as any);
+      const mixed = isMixedDifficultyPlan(plan as any);
+      const dup = hasDuplicateDifficulty(plan as any);
+      const sumsOk = count == null ? true : sum === count;
+      if (!mixed || dup || !sumsOk) {
+        delete (output.inferredPatch as any).difficulty_plan;
+        delete (output.confidence as any).difficulty_plan;
+        if (!output.clarificationQuestion) {
+          output.clarificationQuestion = buildDifficultyClarification(count);
+        }
+      }
+    }
 
     // Risk-aware ambiguity handling: drop BLOCKING fields; allow SAFE/DEFERABLE to apply.
     const risks: Record<string, AmbiguityRisk> = {};

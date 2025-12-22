@@ -35,10 +35,16 @@ export function analyzeSpecGaps(spec: SpecDraft): SpecGaps {
     const key = issue.path[0] as keyof ActivitySpec | undefined;
     if (!key) continue;
 
-    // Missing fields surface as "invalid_type" with received=undefined, but we treat any issue on a key
-    // as a gap that needs user resolution.
+    // Missing required fields: Zod reports invalid_type with received=undefined.
+    // Treat these as "missing" only (not invalid), so prompts are phrased naturally.
+    if (issue.code === "invalid_type" && (issue as any).received === "undefined") {
+      missing.add(key);
+      continue;
+    }
+
+    // Other issues: the field is present but violates the strict contract.
     missing.add(key);
-    if (!invalid[key]) {
+    if (invalid[key] == null) {
       invalid[key] = issue.message;
     }
   }
