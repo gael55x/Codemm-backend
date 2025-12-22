@@ -24,6 +24,12 @@ Codemm follows a strict boundary:
 - `POST /sessions/:id/generate` (auth) → generate activity with Docker-validated reference artifacts (discarded)
 - `GET /sessions/:id` → debug snapshot (includes `commitments` and `generationOutcomes`)
 
+### Runtime + grading APIs
+
+- `POST /run` → sandboxed execution (code-only or multi-file) for supported languages.
+- `POST /submit` → graded execution (requires `testSuite`) using the language’s judge adapter.
+- `GET /activities/:id` (auth) → returns the persisted activity with `problems[]` (each problem includes `language`).
+
 ### Persisted agent memory (auditable)
 
 - `commitments_json`: accepted field/value decisions, with explicit/implicit source + locking.

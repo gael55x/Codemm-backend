@@ -13,6 +13,7 @@ This diagram reflects the **current backend + agent architecture** in one end-to
 - **Agentic intelligence (deterministic)**: commitment memory, ambiguity risk handling, goal-driven questions
 - **Safety**: reference solutions are Docker-validated and then discarded (never persisted)
 - **Observability**: structured progress SSE + optional trace SSE (sanitized, no prompts/raw solutions streamed)
+ - **Activity UX (language-aware)**: learner UI uses per-problem `language` to select editor + runner behavior (Java `*.java`, Python `solution.py` + harness)
 
 ## Single End-to-End Diagram
 
