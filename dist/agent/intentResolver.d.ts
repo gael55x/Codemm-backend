@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { type JsonPatchOp } from "../compiler/jsonPatch";
 import { type SpecDraft } from "../compiler/specDraft";
+import type { CommitmentStore } from "./commitments";
 export type IntentResolutionResult = {
     kind: "patch";
     patch: JsonPatchOp[];
@@ -66,6 +67,7 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
     }>>;
     clarificationQuestion: z.ZodOptional<z.ZodString>;
 }, "strict", z.ZodTypeAny, {
+    confidence: Record<string, number>;
     inferredPatch: {
         language?: "java" | "python" | undefined;
         problem_count?: number | undefined;
@@ -76,7 +78,6 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
         topic_tags?: string[] | undefined;
         problem_style?: "stdout" | "return" | "mixed" | undefined;
     };
-    confidence: Record<string, number>;
     rationale: string;
     revision?: {
         replaces?: any[] | undefined;
@@ -84,6 +85,7 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
     } | undefined;
     clarificationQuestion?: string | undefined;
 }, {
+    confidence: Record<string, number>;
     inferredPatch: {
         language?: "java" | "python" | undefined;
         problem_count?: number | undefined;
@@ -94,7 +96,6 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
         topic_tags?: string[] | undefined;
         problem_style?: "stdout" | "return" | "mixed" | undefined;
     };
-    confidence: Record<string, number>;
     rationale: string;
     revision?: {
         replaces?: any[] | undefined;
@@ -102,6 +103,7 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
     } | undefined;
     clarificationQuestion?: string | undefined;
 }>, {
+    confidence: Record<string, number>;
     inferredPatch: {
         language?: "java" | "python" | undefined;
         problem_count?: number | undefined;
@@ -112,7 +114,6 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
         topic_tags?: string[] | undefined;
         problem_style?: "stdout" | "return" | "mixed" | undefined;
     };
-    confidence: Record<string, number>;
     rationale: string;
     revision?: {
         replaces?: any[] | undefined;
@@ -120,6 +121,7 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
     } | undefined;
     clarificationQuestion?: string | undefined;
 }, {
+    confidence: Record<string, number>;
     inferredPatch: {
         language?: "java" | "python" | undefined;
         problem_count?: number | undefined;
@@ -130,7 +132,6 @@ declare const IntentResolutionSchema: z.ZodEffects<z.ZodObject<{
         topic_tags?: string[] | undefined;
         problem_style?: "stdout" | "return" | "mixed" | undefined;
     };
-    confidence: Record<string, number>;
     rationale: string;
     revision?: {
         replaces?: any[] | undefined;
@@ -142,6 +143,8 @@ export type IntentResolutionOutput = z.infer<typeof IntentResolutionSchema>;
 export declare function resolveIntentWithLLM(args: {
     userMessage: string;
     currentSpec: SpecDraft;
+    commitments?: CommitmentStore | undefined;
+    currentQuestionKey?: string | null | undefined;
 }): Promise<IntentResolutionResult>;
 export {};
 //# sourceMappingURL=intentResolver.d.ts.map

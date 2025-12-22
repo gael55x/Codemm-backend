@@ -3,6 +3,8 @@ import type { SpecDraft } from "../compiler/specDraft";
 import type { ConfidenceMap, ReadinessResult } from "./readiness";
 import { listAgentSelectableLanguages } from "../languages/profiles";
 import type { DialogueUpdate, UserEditableSpecKey } from "./dialogue";
+import { selectNextGoal } from "./conversationGoals";
+import type { CommitmentStore } from "./commitments";
 
 function formatKnown(spec: SpecDraft): string {
   const parts: string[] = [];
@@ -72,6 +74,7 @@ export function generateNextPrompt(args: {
   spec: SpecDraft;
   readiness: ReadinessResult;
   confidence?: ConfidenceMap | null;
+  commitments?: CommitmentStore | null;
   lastUserMessage: string;
   dialogueUpdate?: DialogueUpdate | null;
 }): string {
@@ -94,44 +97,6 @@ export function generateNextPrompt(args: {
     );
   }
 
-  // Schema gaps drive the next question.
-  const missing = args.readiness.gaps.missing;
-  if (missing.includes("language")) {
-    const langs = listAgentSelectableLanguages().map((l) => l.toUpperCase()).join(", ");
-    return preface + `Which language should we use? (${langs || "JAVA"} is available today.)`;
-  }
-  if (missing.includes("problem_count")) {
-    return preface + "How many problems should we build? (1–7 works well.)";
-  }
-  if (missing.includes("difficulty_plan")) {
-    const count = typeof args.spec.problem_count === "number" ? args.spec.problem_count : null;
-    if (count) {
-      const countChanged = args.dialogueUpdate?.changed.problem_count != null;
-      return (
-        preface +
-        `${countChanged ? `Since the count changed, ` : ""}how should we split the difficulty for ${count} problems?\n` +
-        `Example: easy:2, medium:2, hard:1`
-      );
-    }
-    return preface + "Should this be beginner-friendly, mixed, or interview-level?";
-  }
-  if (missing.includes("topic_tags")) {
-    return (
-      preface +
-      "What should the problems focus on?\n" +
-      "Example: encapsulation, inheritance, polymorphism"
-    );
-  }
-  if (missing.includes("problem_style")) {
-    return (
-      preface +
-      "How should solutions be checked?\n" +
-      "- stdout (print output)\n" +
-      "- return (method returns a value)\n" +
-      "- mixed"
-    );
-  }
-
   // If we get here, we have some invalid fields.
   const invalidKeys = Object.keys(args.readiness.gaps.invalid);
   if (invalidKeys.length > 0) {
@@ -142,6 +107,39 @@ export function generateNextPrompt(args: {
       preface +
       `I need to adjust "${first}"${conf ? ` (confidence ${conf})` : ""}: ${msg ?? "invalid value"}\n` +
       `Can you restate what you want for that?`
+    );
+  }
+
+  const nextGoal = selectNextGoal({ spec: args.spec, gaps: args.readiness.gaps, commitments: args.commitments ?? null });
+  if (nextGoal === "language") {
+    const langs = listAgentSelectableLanguages().map((l) => l.toUpperCase()).join(", ");
+    return preface + `Which language should we use? (${langs || "JAVA"} is available today.)`;
+  }
+  if (nextGoal === "scope") {
+    return preface + "How many problems should we build? (1–7 works well.)";
+  }
+  if (nextGoal === "difficulty") {
+    const count = typeof args.spec.problem_count === "number" ? args.spec.problem_count : null;
+    if (count) {
+      const countChanged = args.dialogueUpdate?.changed.problem_count != null;
+      return (
+        preface +
+        `${countChanged ? `Since the count changed, ` : ""}how should we split the difficulty for ${count} problems?\n` +
+        `Example: easy:2, medium:2, hard:1`
+      );
+    }
+    return preface + "How hard should the problems be overall? (easy / medium / hard counts)";
+  }
+  if (nextGoal === "content") {
+    return preface + "What should the problems focus on?\nExample: encapsulation, inheritance, polymorphism";
+  }
+  if (nextGoal === "checking") {
+    return (
+      preface +
+      "How should solutions be checked?\n" +
+      "- stdout (print output)\n" +
+      "- return (method returns a value)\n" +
+      "- mixed"
     );
   }
 

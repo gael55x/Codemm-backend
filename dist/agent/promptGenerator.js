@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateNextPrompt = generateNextPrompt;
 const profiles_1 = require("../languages/profiles");
+const conversationGoals_1 = require("./conversationGoals");
 function formatKnown(spec) {
     const parts = [];
     if (spec.language)
@@ -85,37 +86,6 @@ function generateNextPrompt(args) {
             `Before I generate, I want to confirm ${listToSentence(fields)}.\n` +
             `Can you confirm or adjust those?`);
     }
-    // Schema gaps drive the next question.
-    const missing = args.readiness.gaps.missing;
-    if (missing.includes("language")) {
-        const langs = (0, profiles_1.listAgentSelectableLanguages)().map((l) => l.toUpperCase()).join(", ");
-        return preface + `Which language should we use? (${langs || "JAVA"} is available today.)`;
-    }
-    if (missing.includes("problem_count")) {
-        return preface + "How many problems should we build? (1–7 works well.)";
-    }
-    if (missing.includes("difficulty_plan")) {
-        const count = typeof args.spec.problem_count === "number" ? args.spec.problem_count : null;
-        if (count) {
-            const countChanged = args.dialogueUpdate?.changed.problem_count != null;
-            return (preface +
-                `${countChanged ? `Since the count changed, ` : ""}how should we split the difficulty for ${count} problems?\n` +
-                `Example: easy:2, medium:2, hard:1`);
-        }
-        return preface + "Should this be beginner-friendly, mixed, or interview-level?";
-    }
-    if (missing.includes("topic_tags")) {
-        return (preface +
-            "What should the problems focus on?\n" +
-            "Example: encapsulation, inheritance, polymorphism");
-    }
-    if (missing.includes("problem_style")) {
-        return (preface +
-            "How should solutions be checked?\n" +
-            "- stdout (print output)\n" +
-            "- return (method returns a value)\n" +
-            "- mixed");
-    }
     // If we get here, we have some invalid fields.
     const invalidKeys = Object.keys(args.readiness.gaps.invalid);
     if (invalidKeys.length > 0) {
@@ -125,6 +95,34 @@ function generateNextPrompt(args) {
         return (preface +
             `I need to adjust "${first}"${conf ? ` (confidence ${conf})` : ""}: ${msg ?? "invalid value"}\n` +
             `Can you restate what you want for that?`);
+    }
+    const nextGoal = (0, conversationGoals_1.selectNextGoal)({ spec: args.spec, gaps: args.readiness.gaps, commitments: args.commitments ?? null });
+    if (nextGoal === "language") {
+        const langs = (0, profiles_1.listAgentSelectableLanguages)().map((l) => l.toUpperCase()).join(", ");
+        return preface + `Which language should we use? (${langs || "JAVA"} is available today.)`;
+    }
+    if (nextGoal === "scope") {
+        return preface + "How many problems should we build? (1–7 works well.)";
+    }
+    if (nextGoal === "difficulty") {
+        const count = typeof args.spec.problem_count === "number" ? args.spec.problem_count : null;
+        if (count) {
+            const countChanged = args.dialogueUpdate?.changed.problem_count != null;
+            return (preface +
+                `${countChanged ? `Since the count changed, ` : ""}how should we split the difficulty for ${count} problems?\n` +
+                `Example: easy:2, medium:2, hard:1`);
+        }
+        return preface + "How hard should the problems be overall? (easy / medium / hard counts)";
+    }
+    if (nextGoal === "content") {
+        return preface + "What should the problems focus on?\nExample: encapsulation, inheritance, polymorphism";
+    }
+    if (nextGoal === "checking") {
+        return (preface +
+            "How should solutions be checked?\n" +
+            "- stdout (print output)\n" +
+            "- return (method returns a value)\n" +
+            "- mixed");
     }
     return preface + "What would you like this activity to focus on?";
 }

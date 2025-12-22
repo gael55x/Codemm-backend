@@ -10,6 +10,7 @@ const jsonPatch_1 = require("../compiler/jsonPatch");
 const specDraft_1 = require("../compiler/specDraft");
 const profiles_1 = require("../languages/profiles");
 const dialogue_1 = require("./dialogue");
+const ambiguity_1 = require("./ambiguity");
 const CODEX_MODEL = process.env.CODEX_MODEL ?? "gpt-4.1";
 const CONTRACT_LANGUAGES = activitySpec_1.ActivityLanguageSchema.options.join(", ");
 const SELECTABLE_LANGUAGES = (0, profiles_1.listAgentSelectableLanguages)().join(", ");
@@ -175,12 +176,21 @@ ${languageProfiles}
 `.trim();
 }
 function buildUserPrompt(args) {
+    const locked = {};
+    const store = args.commitments ?? {};
+    for (const [k, v] of Object.entries(store)) {
+        if (v?.locked === true)
+            locked[k] = v.value;
+    }
     return `
 User message:
 ${args.userMessage}
 
 Current partial ActivitySpec (JSON):
 ${JSON.stringify(args.currentSpec)}
+
+Locked commitments (do NOT change unless user explicitly contradicts):
+${JSON.stringify(locked)}
 
 Output JSON schema:
 {
@@ -215,6 +225,94 @@ function toTopLevelPatch(current, inferred) {
         });
     }
     return patch;
+}
+function jsonStable(value) {
+    try {
+        return JSON.stringify(value);
+    }
+    catch {
+        return String(value);
+    }
+}
+function isExplicitForField(args) {
+    const msg = args.userMessage.trim().toLowerCase();
+    if (args.output?.revision?.replaces?.includes(args.field))
+        return true;
+    const qk = args.currentQuestionKey ?? null;
+    if (qk === args.field)
+        return true;
+    if (qk?.startsWith("invalid:") && qk.slice("invalid:".length) === args.field)
+        return true;
+    if (qk?.startsWith("goal:")) {
+        const goal = qk.slice("goal:".length);
+        if (goal === "content" && args.field === "topic_tags")
+            return true;
+        if (goal === "scope" && args.field === "problem_count")
+            return true;
+        if (goal === "difficulty" && args.field === "difficulty_plan")
+            return true;
+        if (goal === "checking" && args.field === "problem_style")
+            return true;
+        if (goal === "language" && args.field === "language")
+            return true;
+    }
+    if (args.field === "language")
+        return /\b(java|python)\b/.test(msg);
+    if (args.field === "problem_count") {
+        return /(\b\d+\b)\s*(problems|problem|questions|question|exercises|exercise)\b/.test(msg) || /^(?:i want )?\d+\b/.test(msg);
+    }
+    if (args.field === "problem_style")
+        return /\b(stdout|return|mixed)\b/.test(msg);
+    if (args.field === "difficulty_plan")
+        return /\b(easy|medium|hard)\b/.test(msg);
+    if (args.field === "topic_tags")
+        return msg.includes(",") || /\b(topic|topics|focus on|focus|cover|about)\b/.test(msg);
+    return false;
+}
+function filterInferredPatchByCommitments(args) {
+    const commitments = args.commitments ?? {};
+    const next = { ...args.inferredPatch };
+    for (const key of Object.keys(next)) {
+        const committed = commitments[key];
+        if (!committed?.locked)
+            continue;
+        const incoming = next[key];
+        const same = jsonStable(incoming) === jsonStable(committed.value);
+        if (same)
+            continue;
+        const explicit = isExplicitForField({
+            field: key,
+            userMessage: args.userMessage,
+            currentQuestionKey: args.currentQuestionKey,
+            output: args.output,
+        });
+        if (!explicit) {
+            delete next[key];
+        }
+    }
+    return next;
+}
+function defaultClarificationForBlockingField(field, currentSpec) {
+    switch (field) {
+        case "language": {
+            const langs = (0, profiles_1.listAgentSelectableLanguages)().map((l) => l.toUpperCase()).join(", ");
+            return `Which language should we use? (${langs || "JAVA"} is available today.)`;
+        }
+        case "problem_count":
+            return "How many problems should we build? (1–7 works well.)";
+        case "difficulty_plan": {
+            const count = typeof currentSpec.problem_count === "number" ? currentSpec.problem_count : null;
+            return count
+                ? `How should we split the difficulty for ${count} problems?\nExample: easy:2, medium:2, hard:1`
+                : "Should this be beginner-friendly, mixed, or interview-level?";
+        }
+        case "topic_tags":
+            return "What should the problems focus on?\nExample: encapsulation, inheritance, polymorphism";
+        case "problem_style":
+            return "How should solutions be checked? (stdout, return, or mixed)";
+        default:
+            return "Can you clarify what you want?";
+    }
 }
 async function resolveIntentWithLLM(args) {
     const userMessage = args.userMessage.trim();
@@ -280,7 +378,7 @@ async function resolveIntentWithLLM(args) {
     try {
         const completion = await (0, codex_1.createCodexCompletion)({
             system: buildSystemPrompt(),
-            user: buildUserPrompt({ userMessage, currentSpec: args.currentSpec }),
+            user: buildUserPrompt({ userMessage, currentSpec: args.currentSpec, commitments: args.commitments }),
             model: CODEX_MODEL,
             temperature: 0.2,
             maxTokens: 1200,
@@ -296,12 +394,43 @@ async function resolveIntentWithLLM(args) {
             return { kind: "error", error: "Intent resolver returned invalid JSON." };
         }
         let output = applyTopicDominanceHeuristic(args.currentSpec, userMessage, out.data);
+        output = {
+            ...output,
+            inferredPatch: filterInferredPatchByCommitments({
+                inferredPatch: output.inferredPatch,
+                commitments: args.commitments,
+                userMessage,
+                currentQuestionKey: args.currentQuestionKey,
+                output,
+            }),
+        };
+        // Risk-aware ambiguity handling: drop BLOCKING fields; allow SAFE/DEFERABLE to apply.
+        const risks = {};
+        const blockingFields = [];
+        for (const key of Object.keys(output.inferredPatch)) {
+            const c = output.confidence?.[String(key)] ?? 0;
+            const risk = (0, ambiguity_1.classifyAmbiguityRisk)(key, c);
+            risks[String(key)] = risk;
+            if (risk === ambiguity_1.AmbiguityRisk.BLOCKING) {
+                blockingFields.push(key);
+                delete output.inferredPatch[key];
+            }
+        }
+        if (blockingFields.length > 0) {
+            (0, trace_1.trace)("agent.intentResolver.ambiguity", { risks, blockingFields });
+        }
         // Convert inferredPatch to JSON Patch ops and validate against draft contract.
         const patch = toTopLevelPatch(args.currentSpec, output.inferredPatch);
         if (patch.length === 0) {
-            if (output.clarificationQuestion) {
-                return { kind: "clarify", question: output.clarificationQuestion, output };
+            if (blockingFields.length > 0) {
+                return {
+                    kind: "clarify",
+                    question: output.clarificationQuestion ?? defaultClarificationForBlockingField(blockingFields[0], args.currentSpec),
+                    output,
+                };
             }
+            if (output.clarificationQuestion)
+                return { kind: "clarify", question: output.clarificationQuestion, output };
             return { kind: "noop", output };
         }
         const inferredKeys = new Set(Object.keys(output.inferredPatch));

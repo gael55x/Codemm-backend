@@ -26,6 +26,7 @@ const generationFallback_1 = require("../agent/generationFallback");
 const errors_1 = require("../generation/errors");
 const dialogue_1 = require("../agent/dialogue");
 const progressBus_1 = require("../generation/progressBus");
+const commitments_1 = require("../agent/commitments");
 function parseJsonObject(json) {
     if (!json)
         return {};
@@ -52,6 +53,31 @@ function parseJsonArray(json) {
     }
     return [];
 }
+function parseGenerationOutcomes(json) {
+    const parsed = parseJsonArray(json);
+    const outcomes = [];
+    for (const item of parsed) {
+        if (!item || typeof item !== "object")
+            continue;
+        const slotIndex = item.slotIndex;
+        const success = item.success;
+        const retries = item.retries;
+        const appliedFallback = item.appliedFallback;
+        if (typeof slotIndex !== "number" || !Number.isFinite(slotIndex))
+            continue;
+        if (typeof success !== "boolean")
+            continue;
+        if (typeof retries !== "number" || !Number.isFinite(retries))
+            continue;
+        outcomes.push({
+            slotIndex,
+            success,
+            retries,
+            ...(typeof appliedFallback === "string" && appliedFallback.trim() ? { appliedFallback } : {}),
+        });
+    }
+    return outcomes;
+}
 function mergeConfidence(existing, incoming) {
     const next = { ...existing };
     for (const [k, v] of Object.entries(incoming)) {
@@ -60,6 +86,76 @@ function mergeConfidence(existing, incoming) {
         next[k] = Math.max(0, Math.min(1, v));
     }
     return next;
+}
+function isPureConfirmationMessage(message) {
+    const m = message.trim().toLowerCase();
+    if (!m)
+        return false;
+    if (m.length > 40)
+        return false;
+    return (m === "y" ||
+        m === "yes" ||
+        m === "yep" ||
+        m === "yeah" ||
+        m === "sure" ||
+        m === "ok" ||
+        m === "okay" ||
+        m === "confirm" ||
+        m === "confirmed" ||
+        m === "looks good" ||
+        m === "sounds good" ||
+        m === "go ahead" ||
+        m === "proceed");
+}
+function inferCommitmentSource(args) {
+    const msg = args.userMessage.trim().toLowerCase();
+    const qk = args.currentQuestionKey;
+    const goal = qk?.startsWith("goal:") ? qk.slice("goal:".length) : null;
+    if (args.output?.revision?.replaces?.includes(args.field))
+        return "explicit";
+    if (qk === args.field)
+        return "explicit";
+    if (qk?.startsWith("invalid:") && qk.slice("invalid:".length) === args.field)
+        return "explicit";
+    if (goal === "content" && args.field === "topic_tags")
+        return "explicit";
+    if (goal === "scope" && args.field === "problem_count")
+        return "explicit";
+    if (goal === "difficulty" && args.field === "difficulty_plan")
+        return "explicit";
+    if (goal === "checking" && args.field === "problem_style")
+        return "explicit";
+    if (goal === "language" && args.field === "language")
+        return "explicit";
+    if (args.field === "problem_count") {
+        if (/(\b\d+\b)\s*(problems|problem|questions|question|exercises|exercise)\b/.test(msg))
+            return "explicit";
+        if (/^(?:i want )?\d+\b/.test(msg))
+            return "explicit";
+    }
+    if (args.field === "problem_style") {
+        if (/\b(stdout|return|mixed)\b/.test(msg))
+            return "explicit";
+    }
+    if (args.field === "difficulty_plan") {
+        if (/\b(easy|medium|hard)\b/.test(msg))
+            return "explicit";
+        if (/\b(easy|medium|hard)\s*:\s*\d+\b/.test(msg))
+            return "explicit";
+    }
+    if (args.field === "topic_tags") {
+        if (qk === "topic_tags")
+            return "explicit";
+        if (msg.includes(",") && msg.length <= 200)
+            return "explicit";
+        if (/\b(topic|topics|focus on|focus|cover|about)\b/.test(msg))
+            return "explicit";
+    }
+    if (args.field === "language") {
+        if (/\b(java|python)\b/.test(msg))
+            return "explicit";
+    }
+    return "implicit";
 }
 function appendIntentTrace(existing, entry, maxEntries = 200) {
     const next = [...existing, entry];
@@ -170,7 +266,7 @@ function createSession(userId) {
     const initialSpec = fixed.length > 0 ? (0, jsonPatch_1.applyJsonPatch)({}, fixed) : {};
     // Contract allows null or {} — DB column is NOT NULL, so we store {}.
     database_1.sessionDb.create(id, state, JSON.stringify(initialSpec), userId ?? null);
-    const initialQuestionKey = (0, questionKey_1.getDynamicQuestionKey)(initialSpec, {});
+    const initialQuestionKey = (0, questionKey_1.getDynamicQuestionKey)(initialSpec, {}, null);
     database_1.sessionCollectorDb.upsert(id, initialQuestionKey, []);
     return { sessionId: id, state };
 }
@@ -179,8 +275,10 @@ function getSession(id) {
     const messages = database_1.sessionMessageDb.findBySessionId(id);
     const spec = parseSpecJson(s.spec_json);
     const confidence = parseJsonObject(s.confidence_json);
-    const collector = getCollectorState(id, (0, questionKey_1.getDynamicQuestionKey)(spec, confidence));
+    const commitments = (0, commitments_1.parseCommitmentsJson)(s.commitments_json);
+    const collector = getCollectorState(id, (0, questionKey_1.getDynamicQuestionKey)(spec, confidence, commitments));
     const intentTrace = parseJsonArray(s.intent_trace_json).slice(-50);
+    const generationOutcomes = parseGenerationOutcomes(s.generation_outcomes_json);
     return {
         id: s.id,
         state: s.state,
@@ -188,6 +286,8 @@ function getSession(id) {
         messages,
         collector,
         confidence,
+        commitments: (0, commitments_1.listCommitments)(commitments),
+        generationOutcomes,
         intentTrace,
     };
 }
@@ -204,12 +304,13 @@ async function processSessionMessage(sessionId, message) {
         }
         const currentSpec = parseSpecJson(s.spec_json);
         const existingConfidence = parseJsonObject(s.confidence_json);
+        let commitmentsStore = (0, commitments_1.parseCommitmentsJson)(s.commitments_json);
         // Always persist user message.
         database_1.sessionMessageDb.create(crypto_1.default.randomUUID(), sessionId, "user", message);
         const fixed = (0, specDraft_1.ensureFixedFields)(currentSpec);
         const specWithFixed = fixed.length > 0 ? (0, jsonPatch_1.applyJsonPatch)(currentSpec, fixed) : currentSpec;
         (0, trace_1.trace)("session.spec.fixed", { sessionId, fixedOps: fixed.map((op) => op.path) });
-        const expectedQuestionKey = (0, questionKey_1.getDynamicQuestionKey)(specWithFixed, existingConfidence);
+        const expectedQuestionKey = (0, questionKey_1.getDynamicQuestionKey)(specWithFixed, existingConfidence, commitmentsStore);
         const collector = getCollectorState(sessionId, expectedQuestionKey);
         const updatedBuffer = [...collector.buffer, message];
         persistCollectorState(sessionId, { currentQuestionKey: expectedQuestionKey, buffer: updatedBuffer });
@@ -217,9 +318,73 @@ async function processSessionMessage(sessionId, message) {
         (0, trace_1.traceText)("session.message.combined", combined, { extra: { sessionId, bufferLen: updatedBuffer.length } });
         const existingTrace = parseJsonArray(s.intent_trace_json);
         let effectiveConfidence = { ...existingConfidence };
+        // Deterministic confirmation: if we're only asking to confirm low-confidence fields and the user replies "yes",
+        // lock those fields and skip the LLM roundtrip.
+        if (expectedQuestionKey?.startsWith("confirm:") && isPureConfirmationMessage(combined)) {
+            const fields = expectedQuestionKey
+                .slice("confirm:".length)
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean);
+            for (const field of fields) {
+                const value = specWithFixed[field];
+                if (value === undefined)
+                    continue;
+                effectiveConfidence[String(field)] = 1;
+                commitmentsStore = (0, commitments_1.upsertCommitment)(commitmentsStore, {
+                    field,
+                    value,
+                    confidence: 1,
+                    source: "explicit",
+                });
+            }
+            database_1.sessionDb.updateConfidenceJson(sessionId, JSON.stringify(effectiveConfidence));
+            database_1.sessionDb.updateCommitmentsJson(sessionId, (0, commitments_1.serializeCommitments)(commitmentsStore));
+            const nextTrace = appendIntentTrace(existingTrace, {
+                ts: new Date().toISOString(),
+                type: "commitment_confirmation",
+                fields,
+            });
+            database_1.sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
+            existingTrace.splice(0, existingTrace.length, ...nextTrace);
+            const readiness = (0, readiness_1.computeReadiness)(specWithFixed, effectiveConfidence, commitmentsStore);
+            const nextQuestion = (0, promptGenerator_1.generateNextPrompt)({
+                spec: specWithFixed,
+                readiness,
+                confidence: effectiveConfidence,
+                commitments: commitmentsStore,
+                lastUserMessage: combined,
+            });
+            database_1.sessionMessageDb.create(crypto_1.default.randomUUID(), sessionId, "assistant", nextQuestion);
+            const nextKey = (0, questionKey_1.getDynamicQuestionKey)(specWithFixed, effectiveConfidence, commitmentsStore);
+            persistCollectorState(sessionId, {
+                currentQuestionKey: nextKey,
+                buffer: [],
+            });
+            const done = readiness.ready;
+            const target = done ? "READY" : "CLARIFYING";
+            if (!done) {
+                transitionOrThrow(state, target);
+                database_1.sessionDb.updateState(sessionId, target);
+                return { accepted: true, state: target, nextQuestion, questionKey: nextKey, done: false, spec: specWithFixed, patch: fixed };
+            }
+            if (state === "DRAFT") {
+                transitionOrThrow("DRAFT", "CLARIFYING");
+                database_1.sessionDb.updateState(sessionId, "CLARIFYING");
+                transitionOrThrow("CLARIFYING", "READY");
+                database_1.sessionDb.updateState(sessionId, "READY");
+            }
+            else {
+                transitionOrThrow(state, "READY");
+                database_1.sessionDb.updateState(sessionId, "READY");
+            }
+            return { accepted: true, state: "READY", nextQuestion, questionKey: nextKey, done: true, spec: specWithFixed, patch: fixed };
+        }
         const resolved = await (0, intentResolver_1.resolveIntentWithLLM)({
             userMessage: combined,
             currentSpec: specWithFixed,
+            currentQuestionKey: expectedQuestionKey,
+            commitments: commitmentsStore,
         }).catch((e) => ({ kind: "error", error: e?.message ?? String(e) }));
         if ("output" in resolved && resolved.output) {
             const output = resolved.output;
@@ -244,8 +409,9 @@ async function processSessionMessage(sessionId, message) {
             const assistantText = resolved.question;
             database_1.sessionMessageDb.create(crypto_1.default.randomUUID(), sessionId, "assistant", assistantText);
             database_1.sessionDb.updateSpecJson(sessionId, JSON.stringify(specWithFixed));
+            const nextKey = (0, questionKey_1.getDynamicQuestionKey)(specWithFixed, effectiveConfidence, commitmentsStore);
             persistCollectorState(sessionId, {
-                currentQuestionKey: (0, questionKey_1.getDynamicQuestionKey)(specWithFixed, effectiveConfidence),
+                currentQuestionKey: nextKey,
                 buffer: [],
             });
             const target = "CLARIFYING";
@@ -255,6 +421,7 @@ async function processSessionMessage(sessionId, message) {
                 accepted: true,
                 state: target,
                 nextQuestion: assistantText,
+                questionKey: nextKey,
                 done: false,
                 spec: specWithFixed,
                 patch: fixed,
@@ -263,7 +430,34 @@ async function processSessionMessage(sessionId, message) {
         if (resolved.kind === "patch") {
             const nextSpec = resolved.merged;
             database_1.sessionDb.updateSpecJson(sessionId, JSON.stringify(nextSpec));
-            const readiness = (0, readiness_1.computeReadiness)(resolved.merged, effectiveConfidence);
+            // Update commitments for any accepted user-editable fields and clear commitments for invalidated removals.
+            for (const op of resolved.patch) {
+                if (!op.path.startsWith("/"))
+                    continue;
+                const key = op.path.slice(1);
+                if (!dialogue_1.USER_EDITABLE_SPEC_KEYS.includes(key))
+                    continue;
+                if (op.op === "remove") {
+                    commitmentsStore = (0, commitments_1.removeCommitment)(commitmentsStore, key);
+                    continue;
+                }
+                const value = resolved.merged[key];
+                const source = inferCommitmentSource({
+                    field: key,
+                    userMessage: combined,
+                    currentQuestionKey: expectedQuestionKey,
+                    output: resolved.output ?? null,
+                });
+                const confidenceForKey = effectiveConfidence[String(key)] ?? resolved.output?.confidence?.[String(key)] ?? 0;
+                commitmentsStore = (0, commitments_1.upsertCommitment)(commitmentsStore, {
+                    field: key,
+                    value,
+                    confidence: confidenceForKey,
+                    source,
+                });
+            }
+            database_1.sessionDb.updateCommitmentsJson(sessionId, (0, commitments_1.serializeCommitments)(commitmentsStore));
+            const readiness = (0, readiness_1.computeReadiness)(resolved.merged, effectiveConfidence, commitmentsStore);
             (0, trace_1.trace)("session.readiness", {
                 sessionId,
                 schemaComplete: readiness.gaps.complete,
@@ -292,12 +486,14 @@ async function processSessionMessage(sessionId, message) {
                 spec: resolved.merged,
                 readiness,
                 confidence: effectiveConfidence,
+                commitments: commitmentsStore,
                 lastUserMessage: combined,
                 dialogueUpdate,
             });
             database_1.sessionMessageDb.create(crypto_1.default.randomUUID(), sessionId, "assistant", nextQuestion);
+            const nextKey = (0, questionKey_1.getDynamicQuestionKey)(resolved.merged, effectiveConfidence, commitmentsStore);
             persistCollectorState(sessionId, {
-                currentQuestionKey: (0, questionKey_1.getDynamicQuestionKey)(resolved.merged, effectiveConfidence),
+                currentQuestionKey: nextKey,
                 buffer: [],
             });
             if (!done) {
@@ -308,6 +504,7 @@ async function processSessionMessage(sessionId, message) {
                     accepted: true,
                     state: target,
                     nextQuestion,
+                    questionKey: nextKey,
                     done: false,
                     spec: nextSpec,
                     patch: [...fixed, ...resolved.patch],
@@ -327,6 +524,7 @@ async function processSessionMessage(sessionId, message) {
                 accepted: true,
                 state: "READY",
                 nextQuestion,
+                questionKey: nextKey,
                 done: true,
                 spec: nextSpec,
                 patch: [...fixed, ...resolved.patch],
@@ -334,16 +532,18 @@ async function processSessionMessage(sessionId, message) {
         }
         // LLM returned noop/error: fall back to deterministic "what's missing next" prompt.
         (0, trace_1.trace)("session.intent.fallback", { sessionId, kind: resolved.kind });
-        const readiness = (0, readiness_1.computeReadiness)(specWithFixed, effectiveConfidence);
+        const readiness = (0, readiness_1.computeReadiness)(specWithFixed, effectiveConfidence, commitmentsStore);
         const nextQuestion = (0, promptGenerator_1.generateNextPrompt)({
             spec: specWithFixed,
             readiness,
             confidence: effectiveConfidence,
+            commitments: commitmentsStore,
             lastUserMessage: combined,
         });
         database_1.sessionMessageDb.create(crypto_1.default.randomUUID(), sessionId, "assistant", nextQuestion);
+        const nextKey = (0, questionKey_1.getDynamicQuestionKey)(specWithFixed, effectiveConfidence, commitmentsStore);
         persistCollectorState(sessionId, {
-            currentQuestionKey: (0, questionKey_1.getDynamicQuestionKey)(specWithFixed, effectiveConfidence),
+            currentQuestionKey: nextKey,
             buffer: [],
         });
         if (!readiness.ready) {
@@ -354,6 +554,7 @@ async function processSessionMessage(sessionId, message) {
                 accepted: true,
                 state: target,
                 nextQuestion,
+                questionKey: nextKey,
                 done: false,
                 spec: specWithFixed,
                 patch: fixed,
@@ -373,6 +574,7 @@ async function processSessionMessage(sessionId, message) {
             accepted: true,
             state: "READY",
             nextQuestion,
+            questionKey: nextKey,
             done: true,
             spec: specWithFixed,
             patch: fixed,
@@ -448,7 +650,9 @@ async function generateFromSession(sessionId, userId) {
                 throw new Error(`Language "${spec.language}" is not supported for generation yet.`);
             }
             let problems = null;
+            let outcomes = null;
             let usedFallback = false;
+            let appliedFallbackReason = null;
             for (let attempt = 0; attempt < 2 && !problems; attempt++) {
                 // Derive ProblemPlan (always from current spec)
                 const plan = (0, planner_1.deriveProblemPlan)(spec);
@@ -460,12 +664,17 @@ async function generateFromSession(sessionId, userId) {
                 });
                 try {
                     // Generate problems (per-slot with retries + Docker validation + discard reference_solution)
-                    problems = await (0, generation_1.generateProblemsFromPlan)(plan, {
+                    const generated = await (0, generation_1.generateProblemsFromPlan)(plan, {
                         onProgress: (event) => (0, progressBus_1.publishGenerationProgress)(sessionId, event),
                     });
+                    problems = generated.problems;
+                    outcomes = generated.outcomes;
                 }
                 catch (err) {
                     if (err instanceof errors_1.GenerationSlotFailureError) {
+                        if (Array.isArray(err.outcomesSoFar)) {
+                            database_1.sessionDb.updateGenerationOutcomesJson(sessionId, JSON.stringify(err.outcomesSoFar));
+                        }
                         persistTraceEvent({
                             ts: new Date().toISOString(),
                             type: "generation_failure",
@@ -475,6 +684,7 @@ async function generateFromSession(sessionId, userId) {
                             title: err.title ?? null,
                             llmOutputHash: err.llmOutputHash ?? null,
                             message: err.message,
+                            outcomes: err.outcomesSoFar ?? null,
                         });
                         (0, trace_1.trace)("generation.failure.persisted", {
                             sessionId,
@@ -486,6 +696,7 @@ async function generateFromSession(sessionId, userId) {
                             const decision = (0, generationFallback_1.proposeGenerationFallback)(spec);
                             if (decision) {
                                 usedFallback = true;
+                                appliedFallbackReason = decision.reason;
                                 persistTraceEvent({
                                     ts: new Date().toISOString(),
                                     type: "generation_soft_fallback",
@@ -515,6 +726,17 @@ async function generateFromSession(sessionId, userId) {
             }
             if (!problems) {
                 throw new Error("Generation failed: problems were not produced.");
+            }
+            if (outcomes) {
+                const finalOutcomes = appliedFallbackReason
+                    ? outcomes.map((o) => ({ ...o, appliedFallback: o.appliedFallback ?? appliedFallbackReason }))
+                    : outcomes;
+                database_1.sessionDb.updateGenerationOutcomesJson(sessionId, JSON.stringify(finalOutcomes));
+                persistTraceEvent({
+                    ts: new Date().toISOString(),
+                    type: "generation_outcomes",
+                    outcomes: finalOutcomes,
+                });
             }
             // Persist problems_json
             database_1.sessionDb.setProblemsJson(sessionId, JSON.stringify(problems));
