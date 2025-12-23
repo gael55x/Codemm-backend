@@ -77,8 +77,8 @@ flowchart TB
     GEN_PROGRESS["Publish progress events (SSE buffer)<br/>src/generation/progressBus.ts"]
     GEN_SLOT["Per-slot LLM generator + repair prompts<br/>generateSingleProblem()<br/>src/generation/perSlotGenerator.ts"]
     GEN_CONTRACT["Problem contract validation (strict)<br/>GeneratedProblemDraftSchema<br/>src/contracts/problem.ts"]
-    GEN_JAVA_RULES["Java rules (JUnit 5)<br/>8 tests, no package<br/>src/contracts/javaRules.ts"]
-    GEN_PY_RULES["Python rules (pytest)<br/>8 tests: test_case_1..8<br/>solve() required, no IO/randomness<br/>src/contracts/pythonRules.ts"]
+    GEN_JAVA_RULES["Java rules (JUnit 5)<br/>8 tests, no package<br/>src/languages/java/rules.ts"]
+    GEN_PY_RULES["Python rules (pytest)<br/>8 tests: test_case_1..8<br/>solve() required, no IO/randomness<br/>src/languages/python/rules.ts"]
     GEN_VALIDATE_REF["Docker validate reference artifact<br/>validateReferenceSolution()<br/>src/generation/referenceSolutionValidator.ts"]
     GEN_DISCARD["Discard reference_solution/reference_workspace<br/>CRITICAL: never persist"]
     GEN_FALLBACK["Soft fallback (optional, once)<br/>problem_style=return, reduce hard, narrow topics<br/>src/agent/generationFallback.ts"]
@@ -90,10 +90,11 @@ flowchart TB
   %% -------------------------
   subgraph "Language Profiles + Docker"
     LP["Language profiles<br/>executionAdapter + judgeAdapter + generator prompts<br/>src/languages/profiles.ts"]
-    LJAVA["Java profile<br/>src/languages/javaAdapters.ts + src/languages/javaPrompts.ts"]
-    LPY["Python profile<br/>src/languages/pythonProfile.ts + src/languages/pythonAdapters.ts + src/languages/pythonPrompts.ts"]
-    XRUN["Execution runners<br/>Java: src/execution/javaRun.ts<br/>Python: src/execution/pythonRun.ts"]
-    JRUN["Judge runners<br/>Java+Python: src/judge.ts"]
+    LJAVA["Java profile<br/>src/languages/java/profile.ts + src/languages/java/adapters.ts + src/languages/java/prompts.ts"]
+    LPY["Python profile<br/>src/languages/python/profile.ts + src/languages/python/adapters.ts + src/languages/python/prompts.ts"]
+    LCPP["C++ profile<br/>src/languages/cpp/profile.ts + src/languages/cpp/adapters.ts + src/languages/cpp/prompts.ts"]
+    XRUN["Execution runners<br/>Java: src/languages/java/run.ts<br/>Python: src/languages/python/run.ts<br/>C++: src/languages/cpp/run.ts"]
+    JRUN["Judge runners<br/>Java: src/languages/java/judge.ts<br/>Python: src/languages/python/judge.ts<br/>C++: src/languages/cpp/judge.ts<br/>shared: src/judge/exec.ts"]
     DJAVA["Docker image: codem-java-judge<br/>Dockerfile.java-judge"]
     DPY["Docker image: codem-python-judge<br/>Dockerfile.python-judge<br/>sandbox: --network none, --read-only"]
   end
