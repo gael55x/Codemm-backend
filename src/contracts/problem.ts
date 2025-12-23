@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { JavaSourceNoPackageSchema, isValidJUnit5TestSuite } from "./javaRules";
-import { PythonSourceSchema, isValidPytestTestSuite } from "./pythonRules";
-import { CppSourceSchema, isValidCppTestSuite } from "./cppRules";
+import { JavaSourceNoPackageSchema, isValidJUnit5TestSuite } from "../languages/java/rules";
+import { PythonSourceSchema, isValidPytestTestSuite } from "../languages/python/rules";
+import { CppSourceSchema, isValidCppTestSuite } from "../languages/cpp/rules";
 
 function stripJavaComments(source: string): string {
   const withoutBlockComments = source.replace(/\/\*[\s\S]*?\*\//g, "");

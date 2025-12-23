@@ -2,7 +2,10 @@ import crypto from "crypto";
 import { createCodexCompletion } from "../infra/llm/codex";
 import { tryParseJson } from "../utils/jsonParser";
 import { buildDefaultClassSkeleton, inferClassName } from "../utils/javaCodegen";
-import { hasBrittleWhitespaceStringExpectations, isValidJUnit5TestSuite } from "../contracts/javaRules";
+import {
+  hasBrittleWhitespaceStringExpectations,
+  isValidJUnit5TestSuite,
+} from "../languages/java/rules";
 import { GeneratedProblemDraftSchema, type GeneratedProblemDraft } from "../contracts/problem";
 import type { ProblemSlot } from "../planner/types";
 import { buildSlotPromptWithContext, getSystemPromptForSlot } from "./prompts";

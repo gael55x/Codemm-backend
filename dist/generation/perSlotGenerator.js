@@ -8,7 +8,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const codex_1 = require("../infra/llm/codex");
 const jsonParser_1 = require("../utils/jsonParser");
 const javaCodegen_1 = require("../utils/javaCodegen");
-const javaRules_1 = require("../contracts/javaRules");
+const rules_1 = require("../languages/java/rules");
 const problem_1 = require("../contracts/problem");
 const prompts_1 = require("./prompts");
 const trace_1 = require("../utils/trace");
@@ -364,10 +364,10 @@ async function generateSingleProblem(slot, opts) {
                 ? raw.description.trim()
                 : `Problem description for ${title}.`;
             const testSuite = typeof raw.test_suite === "string" && raw.test_suite.trim() ? raw.test_suite.trim() : "";
-            if (!(0, javaRules_1.isValidJUnit5TestSuite)(testSuite, 8)) {
+            if (!(0, rules_1.isValidJUnit5TestSuite)(testSuite, 8)) {
                 throw new Error(`Invalid test_suite for slot ${slot.index}: must have exactly 8 @Test methods, JUnit 5 imports, no package, and non-trivial assertions.`);
             }
-            if ((0, javaRules_1.hasBrittleWhitespaceStringExpectations)(testSuite)) {
+            if ((0, rules_1.hasBrittleWhitespaceStringExpectations)(testSuite)) {
                 throw new Error(`Invalid test_suite for slot ${slot.index}: avoid assertEquals() against string literals with leading/trailing whitespace (brittle).`);
             }
             const target = getWorkspaceTargetFile(raw);
@@ -468,10 +468,10 @@ async function generateSingleProblem(slot, opts) {
         }
         let testSuite = typeof raw.test_suite === "string" && raw.test_suite.trim() ? raw.test_suite.trim() : "";
         // Validate test suite structure strictly
-        if (!(0, javaRules_1.isValidJUnit5TestSuite)(testSuite, 8)) {
+        if (!(0, rules_1.isValidJUnit5TestSuite)(testSuite, 8)) {
             throw new Error(`Invalid test_suite for slot ${slot.index}: must have exactly 8 @Test methods, JUnit 5 imports, no package, and non-trivial assertions.`);
         }
-        if ((0, javaRules_1.hasBrittleWhitespaceStringExpectations)(testSuite)) {
+        if ((0, rules_1.hasBrittleWhitespaceStringExpectations)(testSuite)) {
             throw new Error(`Invalid test_suite for slot ${slot.index}: avoid assertEquals() against string literals with leading/trailing whitespace (brittle).`);
         }
         // Ensure test class name matches starter_code class name + "Test"

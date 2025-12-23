@@ -17,5 +17,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 __exportStar(require("./activitySpec"), exports);
 __exportStar(require("./session"), exports);
 __exportStar(require("./problem"), exports);
-__exportStar(require("./javaRules"), exports);
+__exportStar(require("../languages/java/rules"), exports);
+__exportStar(require("../languages/python/rules"), exports);
+__exportStar(require("../languages/cpp/rules"), exports);
 //# sourceMappingURL=index.js.map

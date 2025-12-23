@@ -2,9 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GeneratedProblemSchema = exports.GeneratedProblemDraftSchema = exports.WorkspaceSchema = exports.WorkspaceFileSchema = void 0;
 const zod_1 = require("zod");
-const javaRules_1 = require("./javaRules");
-const pythonRules_1 = require("./pythonRules");
-const cppRules_1 = require("./cppRules");
+const rules_1 = require("../languages/java/rules");
+const rules_2 = require("../languages/python/rules");
+const rules_3 = require("../languages/cpp/rules");
 function stripJavaComments(source) {
     const withoutBlockComments = source.replace(/\/\*[\s\S]*?\*\//g, "");
     return withoutBlockComments.replace(/\/\/.*$/gm, "");
@@ -49,7 +49,7 @@ const JavaTestSuiteSchema = zod_1.z
     .string()
     .min(1)
     .superRefine((ts, ctx) => {
-    if (!(0, javaRules_1.isValidJUnit5TestSuite)(ts, 8)) {
+    if (!(0, rules_1.isValidJUnit5TestSuite)(ts, 8)) {
         ctx.addIssue({
             code: zod_1.z.ZodIssueCode.custom,
             message: "Invalid test_suite: must have exactly 8 @Test methods, JUnit 5 imports, no package, and non-trivial assertions.",
@@ -60,7 +60,7 @@ const PythonTestSuiteSchema = zod_1.z
     .string()
     .min(1)
     .superRefine((ts, ctx) => {
-    if (!(0, pythonRules_1.isValidPytestTestSuite)(ts, 8)) {
+    if (!(0, rules_2.isValidPytestTestSuite)(ts, 8)) {
         ctx.addIssue({
             code: zod_1.z.ZodIssueCode.custom,
             message: "Invalid test_suite: must use pytest, import solve from solution, define exactly 8 tests named test_case_1..test_case_8, avoid IO/randomness, and assert solve(...) == expected.",
@@ -71,7 +71,7 @@ const CppTestSuiteSchema = zod_1.z
     .string()
     .min(1)
     .superRefine((ts, ctx) => {
-    if (!(0, cppRules_1.isValidCppTestSuite)(ts, 8)) {
+    if (!(0, rules_3.isValidCppTestSuite)(ts, 8)) {
         ctx.addIssue({
             code: zod_1.z.ZodIssueCode.custom,
             message: 'Invalid test_suite: must #include "solution.cpp", define a main(), and include exactly 8 RUN_TEST("test_case_1".."test_case_8", ...) tests with deterministic assertions.',
@@ -88,7 +88,7 @@ exports.WorkspaceFileSchema = zod_1.z
     path: JavaFilenameSchema,
     role: zod_1.z.enum(["entry", "support", "readonly"]),
     // For now, workspace problems are Java-only, so we enforce Java source constraints.
-    content: javaRules_1.JavaSourceNoPackageSchema,
+    content: rules_1.JavaSourceNoPackageSchema,
 })
     .strict();
 exports.WorkspaceSchema = zod_1.z
@@ -152,9 +152,9 @@ const LegacyDraftSchema = CommonProblemFieldsSchema.extend({
     language: zod_1.z.literal("java"),
     test_suite: JavaTestSuiteSchema,
     // Starter code the learner edits.
-    starter_code: javaRules_1.JavaSourceNoPackageSchema,
+    starter_code: rules_1.JavaSourceNoPackageSchema,
     // Hidden solution used ONLY for validation.
-    reference_solution: javaRules_1.JavaSourceNoPackageSchema,
+    reference_solution: rules_1.JavaSourceNoPackageSchema,
 }).strict();
 function refineWorkspaceProblem(draft, ctx) {
     const entrypoint = draft.workspace.entrypoint?.trim();
@@ -179,14 +179,14 @@ const WorkspaceDraftSchema = WorkspaceDraftSchemaBase.superRefine(refineWorkspac
 const PythonDraftSchema = CommonProblemFieldsSchema.extend({
     language: zod_1.z.literal("python"),
     test_suite: PythonTestSuiteSchema,
-    starter_code: pythonRules_1.PythonSourceSchema,
-    reference_solution: pythonRules_1.PythonSourceSchema,
+    starter_code: rules_2.PythonSourceSchema,
+    reference_solution: rules_2.PythonSourceSchema,
 }).strict();
 const CppDraftSchema = CommonProblemFieldsSchema.extend({
     language: zod_1.z.literal("cpp"),
     test_suite: CppTestSuiteSchema,
-    starter_code: cppRules_1.CppSourceSchema,
-    reference_solution: cppRules_1.CppSourceSchema,
+    starter_code: rules_3.CppSourceSchema,
+    reference_solution: rules_3.CppSourceSchema,
 }).strict();
 exports.GeneratedProblemDraftSchema = zod_1.z.union([
     LegacyDraftSchema,

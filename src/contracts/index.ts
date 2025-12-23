@@ -1,4 +1,6 @@
 export * from "./activitySpec";
 export * from "./session";
 export * from "./problem";
-export * from "./javaRules";
+export * from "../languages/java/rules";
+export * from "../languages/python/rules";
+export * from "../languages/cpp/rules";
