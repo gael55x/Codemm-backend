@@ -88,7 +88,7 @@ function isLanguageSwitchConfirmed(userMessage) {
     if (msg === "python" || msg === "java" || msg === "cpp" || msg === "c++" || msg === "sql" || msg === "sqlite")
         return true;
     // Require both a confirmation-ish phrase and an explicit language mention.
-    const hasConfirmWord = /\b(yes|yep|sure|ok|okay|confirm|proceed|switch|change|use|go with)\b/.test(msg);
+    const hasConfirmWord = /\b(yes|yep|sure|ok|okay|confirm|proceed|switch|change|use|go with|want|wanna|prefer)\b/.test(msg);
     const hasLanguage = /\b(python|java|cpp|sql|sqlite)\b/.test(msg) || /\bc\+\+\b/.test(msg);
     return hasConfirmWord && hasLanguage;
 }
@@ -261,7 +261,7 @@ function isExplicitForField(args) {
             return true;
     }
     if (args.field === "language")
-        return /\b(java|python)\b/.test(msg);
+        return /\b(java|python|cpp|sql|sqlite)\b/.test(msg) || /\bc\+\+\b/.test(msg);
     if (args.field === "problem_count") {
         return /(\b\d+\b)\s*(problems|problem|questions|question|exercises|exercise)\b/.test(msg) || /^(?:i want )?\d+\b/.test(msg);
     }
@@ -359,35 +359,16 @@ async function resolveIntentWithLLM(args) {
             output: { inferredPatch: {}, confidence: {}, rationale: "Empty message." },
         };
     }
-    // Deterministic language handling (do not rely on LLM JSON compliance):
-    // - Default to Java when language is missing and user didn't specify.
-    // - If user explicitly requests a language change, require confirmation.
+    // Language handling (deterministic) + multi-field inference:
+    // - Allow language and other fields (topics, count, style) in the same user message.
+    // - Default to Java only when missing (but don't block other inference).
     const explicitLanguage = extractExplicitLanguage(userMessage);
     const currentLanguage = args.currentSpec.language;
     const effectiveCurrentLanguage = currentLanguage ?? "java";
-    const applyLanguagePatch = (language, rationale) => {
-        const output = {
-            inferredPatch: { language },
-            confidence: { language: 1 },
-            rationale,
-            ...(currentLanguage && currentLanguage !== language
-                ? { revision: { replaces: ["language"] } }
-                : {}),
-        };
-        const patch = toTopLevelPatch(args.currentSpec, output.inferredPatch);
-        const merged = (0, jsonPatch_1.applyJsonPatch)(args.currentSpec, patch);
-        const fixedAfter = (0, specDraft_1.ensureFixedFields)(merged);
-        const finalMerged = fixedAfter.length > 0 ? (0, jsonPatch_1.applyJsonPatch)(merged, fixedAfter) : merged;
-        const contractError = (0, specDraft_1.validatePatchedSpecOrError)(finalMerged);
-        if (contractError) {
-            return { kind: "error", error: contractError };
-        }
-        const finalDraftCheck = specDraft_1.ActivitySpecDraftSchema.safeParse(finalMerged);
-        if (!finalDraftCheck.success) {
-            return { kind: "error", error: "Language patch failed draft validation." };
-        }
-        return { kind: "patch", patch: [...patch, ...fixedAfter], merged: finalMerged, output };
-    };
+    const isBareLanguageMessage = /^(?:java|python|cpp|c\+\+|sql|sqlite)\s*$/i.test(userMessage);
+    let baseSpec = args.currentSpec;
+    let basePatch = [];
+    let baseLanguageApplied = null;
     if (explicitLanguage) {
         const isSwitch = explicitLanguage !== effectiveCurrentLanguage;
         if (isSwitch && !isLanguageSwitchConfirmed(userMessage)) {
@@ -397,25 +378,56 @@ async function resolveIntentWithLLM(args) {
                 output: { inferredPatch: {}, confidence: {}, rationale: "Needs language switch confirmation." },
             };
         }
-        // If the user explicitly said a supported language, accept immediately.
-        if (currentLanguage === explicitLanguage) {
-            return {
-                kind: "noop",
-                output: { inferredPatch: {}, confidence: { language: 1 }, rationale: `Language already set to ${explicitLanguage}.` },
+        if (currentLanguage !== explicitLanguage) {
+            const inferred = { language: explicitLanguage };
+            const patch = toTopLevelPatch(baseSpec, inferred);
+            const merged = (0, jsonPatch_1.applyJsonPatch)(baseSpec, patch);
+            const fixedAfter = (0, specDraft_1.ensureFixedFields)(merged);
+            const finalMerged = fixedAfter.length > 0 ? (0, jsonPatch_1.applyJsonPatch)(merged, fixedAfter) : merged;
+            basePatch = [...basePatch, ...patch, ...fixedAfter];
+            baseSpec = finalMerged;
+            baseLanguageApplied = {
+                language: explicitLanguage,
+                rationale: `User explicitly selected ${explicitLanguage}.`,
+                switched: Boolean(currentLanguage && currentLanguage !== explicitLanguage),
             };
         }
-        return applyLanguagePatch(explicitLanguage, `User explicitly selected ${explicitLanguage}.`);
+        else if (isBareLanguageMessage) {
+            return {
+                kind: "noop",
+                output: {
+                    inferredPatch: {},
+                    confidence: { language: 1 },
+                    rationale: `Language already set to ${explicitLanguage}.`,
+                },
+            };
+        }
+        if (isBareLanguageMessage && basePatch.length > 0) {
+            const out = {
+                inferredPatch: { language: baseLanguageApplied.language },
+                confidence: { language: 1 },
+                rationale: baseLanguageApplied.rationale,
+                ...(baseLanguageApplied.switched ? { revision: { replaces: ["language"] } } : {}),
+            };
+            return { kind: "patch", patch: basePatch, merged: baseSpec, output: out };
+        }
     }
-    if (!currentLanguage) {
-        // Default language policy: if not explicitly mentioned, use Java.
-        return applyLanguagePatch("java", "No language specified; defaulting to java.");
+    else if (!currentLanguage) {
+        const inferred = { language: "java" };
+        const patch = toTopLevelPatch(baseSpec, inferred);
+        const merged = (0, jsonPatch_1.applyJsonPatch)(baseSpec, patch);
+        const fixedAfter = (0, specDraft_1.ensureFixedFields)(merged);
+        const finalMerged = fixedAfter.length > 0 ? (0, jsonPatch_1.applyJsonPatch)(merged, fixedAfter) : merged;
+        basePatch = [...basePatch, ...patch, ...fixedAfter];
+        baseSpec = finalMerged;
+        baseLanguageApplied = { language: "java", rationale: "No language specified; defaulting to java.", switched: false };
     }
     (0, trace_1.trace)("agent.intentResolver.start", { model: CODEX_MODEL });
     let rawText = "";
     try {
         const completion = await (0, codex_1.createCodexCompletion)({
             system: buildSystemPrompt(),
-            user: buildUserPrompt({ userMessage, currentSpec: args.currentSpec, commitments: args.commitments }),
+            user: buildUserPrompt({ userMessage, currentSpec: baseSpec, commitments: args.commitments }),
             model: CODEX_MODEL,
             temperature: 0.2,
             maxTokens: 1200,
@@ -430,7 +442,7 @@ async function resolveIntentWithLLM(args) {
             (0, trace_1.trace)("agent.intentResolver.invalid_json", { error: out.error.issues[0]?.message ?? "schema validation failed" });
             return { kind: "error", error: "Intent resolver returned invalid JSON." };
         }
-        let output = applyTopicDominanceHeuristic(args.currentSpec, userMessage, out.data);
+        let output = applyTopicDominanceHeuristic(baseSpec, userMessage, out.data);
         output = {
             ...output,
             inferredPatch: filterInferredPatchByCommitments({
@@ -441,6 +453,33 @@ async function resolveIntentWithLLM(args) {
                 output,
             }),
         };
+        const baseLanguage = baseLanguageApplied?.language;
+        // If language was handled deterministically above, do not allow the LLM to override it.
+        if (typeof baseLanguage === "string") {
+            delete output.inferredPatch.language;
+            delete output.confidence.language;
+            // Merge language signal back into the output for trace/commitment logic.
+            const mergedReplaces = uniqueKeys([
+                ...(output.revision?.replaces ?? []),
+                ...(baseLanguageApplied?.switched ? ["language"] : []),
+            ]);
+            const mergedInvalidates = uniqueKeys([
+                ...(output.revision?.invalidates ?? []),
+            ]);
+            const mergedRevision = mergedReplaces.length > 0 || mergedInvalidates.length > 0
+                ? {
+                    ...(mergedReplaces.length > 0 ? { replaces: mergedReplaces } : {}),
+                    ...(mergedInvalidates.length > 0 ? { invalidates: mergedInvalidates } : {}),
+                }
+                : undefined;
+            output = {
+                ...output,
+                inferredPatch: { ...output.inferredPatch, language: baseLanguage },
+                confidence: { ...output.confidence, language: 1 },
+                rationale: `${baseLanguageApplied?.rationale ?? ""} ${output.rationale}`.trim().slice(0, 1200),
+                ...(mergedRevision ? { revision: mergedRevision } : {}),
+            };
+        }
         // Draft-safety precheck: if the LLM proposes an invalid difficulty_plan (not mixed / duplicates / wrong sum),
         // drop it deterministically and let the dialogue ask for a valid split next.
         if (Array.isArray(output.inferredPatch.difficulty_plan)) {
@@ -479,12 +518,17 @@ async function resolveIntentWithLLM(args) {
             (0, trace_1.trace)("agent.intentResolver.ambiguity", { risks, blockingFields });
         }
         // Convert inferredPatch to JSON Patch ops and validate against draft contract.
-        const patch = toTopLevelPatch(args.currentSpec, output.inferredPatch);
-        if (patch.length === 0) {
+        const effectiveInferred = { ...output.inferredPatch };
+        if (typeof baseLanguage === "string" && effectiveInferred.language === baseSpec.language) {
+            delete effectiveInferred.language;
+        }
+        const patch = toTopLevelPatch(baseSpec, effectiveInferred);
+        const fullPatch = [...basePatch, ...patch];
+        if (fullPatch.length === 0) {
             if (blockingFields.length > 0) {
                 return {
                     kind: "clarify",
-                    question: output.clarificationQuestion ?? defaultClarificationForBlockingField(blockingFields[0], args.currentSpec),
+                    question: output.clarificationQuestion ?? defaultClarificationForBlockingField(blockingFields[0], baseSpec),
                     output,
                 };
             }
@@ -492,12 +536,12 @@ async function resolveIntentWithLLM(args) {
                 return { kind: "clarify", question: output.clarificationQuestion, output };
             return { kind: "noop", output };
         }
-        const inferredKeys = new Set(Object.keys(output.inferredPatch));
-        const autoInvalidates = computeAutoInvalidations(args.currentSpec, output.inferredPatch);
+        const inferredKeys = new Set(Object.keys(effectiveInferred));
+        const autoInvalidates = computeAutoInvalidations(baseSpec, effectiveInferred);
         const userInvalidates = uniqueKeys(output.revision?.invalidates).filter((k) => !inferredKeys.has(k));
         const invalidates = uniqueKeys([...userInvalidates, ...autoInvalidates]);
-        const invalidationPatch = invalidates.length > 0 ? buildInvalidationPatch(args.currentSpec, invalidates) : [];
-        const merged = (0, jsonPatch_1.applyJsonPatch)(args.currentSpec, [...patch, ...invalidationPatch]);
+        const invalidationPatch = invalidates.length > 0 ? buildInvalidationPatch(baseSpec, invalidates) : [];
+        const merged = (0, jsonPatch_1.applyJsonPatch)(baseSpec, [...patch, ...invalidationPatch]);
         // Re-apply fixed invariants after patching (e.g. constraints must match language).
         const fixedAfter = (0, specDraft_1.ensureFixedFields)(merged);
         const finalMerged = fixedAfter.length > 0 ? (0, jsonPatch_1.applyJsonPatch)(merged, fixedAfter) : merged;
@@ -505,7 +549,7 @@ async function resolveIntentWithLLM(args) {
         if (contractError) {
             (0, trace_1.trace)("agent.intentResolver.contract_reject", {
                 error: contractError,
-                patchOps: [...patch, ...invalidationPatch, ...fixedAfter].map((p) => p.path),
+                patchOps: [...basePatch, ...patch, ...invalidationPatch, ...fixedAfter].map((p) => p.path),
             });
             const clarification = output.clarificationQuestion ??
                 `I might be misunderstanding. ${contractError} Can you rephrase what you want?`;
@@ -525,7 +569,12 @@ async function resolveIntentWithLLM(args) {
             };
             nextOutput = { ...output, revision: nextRevision };
         }
-        return { kind: "patch", patch: [...patch, ...invalidationPatch, ...fixedAfter], merged: finalMerged, output: nextOutput };
+        return {
+            kind: "patch",
+            patch: [...basePatch, ...patch, ...invalidationPatch, ...fixedAfter],
+            merged: finalMerged,
+            output: nextOutput,
+        };
     }
     catch (err) {
         (0, trace_1.trace)("agent.intentResolver.exception", { error: err?.message ?? String(err) });
