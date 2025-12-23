@@ -65,7 +65,7 @@ export async function runCppFiles(opts: { files: CppFiles; stdin?: string }): Pr
       "docker run --rm",
       "--network none",
       "--read-only",
-      "--tmpfs /tmp:rw",
+      "--tmpfs /tmp:rw,exec",
       `-v ${tmp}:/workspace:ro`,
       "--workdir /workspace",
       "--entrypoint /bin/bash",
@@ -95,4 +95,3 @@ export async function runCppCodeOnly(userCode: string, stdin?: string): Promise<
   const files: CppFiles = { "main.cpp": userCode };
   return runCppFiles({ files, ...(typeof stdin === "string" ? { stdin } : {}) });
 }
-

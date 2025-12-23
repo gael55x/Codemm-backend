@@ -59,7 +59,7 @@ export async function runCppJudgeFiles(userFiles: CppFiles, testSuite: string): 
       "docker run --rm",
       "--network none",
       "--read-only",
-      "--tmpfs /tmp:rw",
+      "--tmpfs /tmp:rw,exec",
       `-v ${tmp}:/workspace:ro`,
       "--workdir /workspace",
       "--entrypoint /bin/bash",
@@ -96,4 +96,3 @@ export async function runCppJudgeFiles(userFiles: CppFiles, testSuite: string): 
     rmSync(tmp, { recursive: true, force: true });
   }
 }
-

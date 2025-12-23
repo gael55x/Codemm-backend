@@ -40,10 +40,10 @@ function diagnoseCppTestSuite(testSuite, testCount) {
         }
     };
     // Primary: macro style.
-    collect(/RUN_TEST\s*\(\s*"test_case_(\d+)"\b/g);
+    collect(/\bRUN_TEST\s*\(\s*"test_case_(\d+)"\s*(?:,|\))/g);
     // Fallback: function-based runner style.
     if (found.size === 0) {
-        collect(/\brun\s*\(\s*"test_case_(\d+)"\b/g);
+        collect(/\brun\s*\(\s*"test_case_(\d+)"\s*(?:,|\))/g);
     }
     // Last resort: function definitions only.
     if (found.size === 0) {
