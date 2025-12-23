@@ -70,11 +70,17 @@ export async function validateReferenceSolution(draft: GeneratedProblemDraft): P
   const hasCompileError =
     draft.language === "java"
       ? /\berror:|cannot find symbol|class, interface, or enum expected/.test(combinedLower)
-      : draft.language === "python"
+    : draft.language === "python"
       ? /\b(syntaxerror|indentationerror|taberror|modulenotfounderror|importerror)\b/.test(combinedLower)
-      : /\berror:|undefined reference|ld returned|collect2:/i.test(combinedLower);
+    : /\berror:|undefined reference|ld returned|collect2:/i.test(combinedLower);
 
-  if (hasCompileError) {
+  // SQL: treat sqlite parser/operational errors as compile-like.
+  const hasSqlError =
+    draft.language === "sql"
+      ? /\b(operationalerror|syntax error|no such table|no such column)\b/.test(combinedLower)
+      : false;
+
+  if (hasCompileError || hasSqlError) {
     const snippet = `${result.stderr || result.stdout || ""}`.slice(0, 1200);
     const fallback = snippet || `No compiler output captured (exitCode=${result.exitCode ?? "unknown"}).`;
     throw new ReferenceSolutionValidationError(

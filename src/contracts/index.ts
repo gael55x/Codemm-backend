@@ -4,3 +4,4 @@ export * from "./problem";
 export * from "../languages/java/rules";
 export * from "../languages/python/rules";
 export * from "../languages/cpp/rules";
+export * from "../languages/sql/rules";

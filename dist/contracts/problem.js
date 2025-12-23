@@ -5,6 +5,7 @@ const zod_1 = require("zod");
 const rules_1 = require("../languages/java/rules");
 const rules_2 = require("../languages/python/rules");
 const rules_3 = require("../languages/cpp/rules");
+const rules_4 = require("../languages/sql/rules");
 function stripJavaComments(source) {
     const withoutBlockComments = source.replace(/\/\*[\s\S]*?\*\//g, "");
     return withoutBlockComments.replace(/\/\/.*$/gm, "");
@@ -75,6 +76,17 @@ const CppTestSuiteSchema = zod_1.z
         ctx.addIssue({
             code: zod_1.z.ZodIssueCode.custom,
             message: 'Invalid test_suite: must #include "solution.cpp", define a main(), and include exactly 8 RUN_TEST("test_case_1".."test_case_8", ...) tests with deterministic assertions.',
+        });
+    }
+});
+const SqlTestSuiteSchema = zod_1.z
+    .string()
+    .min(1)
+    .superRefine((ts, ctx) => {
+    if (!(0, rules_4.isValidSqlTestSuite)(ts, 8)) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: "Invalid test_suite: must be JSON with schema_sql + exactly 8 cases named test_case_1..test_case_8 including expected columns/rows.",
         });
     }
 });
@@ -188,11 +200,18 @@ const CppDraftSchema = CommonProblemFieldsSchema.extend({
     starter_code: rules_3.CppSourceSchema,
     reference_solution: rules_3.CppSourceSchema,
 }).strict();
+const SqlDraftSchema = CommonProblemFieldsSchema.extend({
+    language: zod_1.z.literal("sql"),
+    test_suite: SqlTestSuiteSchema,
+    starter_code: rules_4.SqlQuerySchema,
+    reference_solution: rules_4.SqlQuerySchema,
+}).strict();
 exports.GeneratedProblemDraftSchema = zod_1.z.union([
     LegacyDraftSchema,
     WorkspaceDraftSchema,
     PythonDraftSchema,
     CppDraftSchema,
+    SqlDraftSchema,
 ]);
 /**
  * Persisted problem shape (reference_solution intentionally omitted).
@@ -202,5 +221,6 @@ exports.GeneratedProblemSchema = zod_1.z.union([
     WorkspaceDraftSchemaBase.omit({ reference_workspace: true }).superRefine(refineWorkspaceProblem),
     PythonDraftSchema.omit({ reference_solution: true }),
     CppDraftSchema.omit({ reference_solution: true }),
+    SqlDraftSchema.omit({ reference_solution: true }),
 ]);
 //# sourceMappingURL=problem.js.map

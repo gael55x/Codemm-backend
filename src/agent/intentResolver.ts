@@ -87,8 +87,9 @@ function wantsTopicDominance(userMessage: string): boolean {
   );
 }
 
-function extractExplicitLanguage(userMessage: string): "java" | "python" | "cpp" | null {
+function extractExplicitLanguage(userMessage: string): "java" | "python" | "cpp" | "sql" | null {
   const msg = userMessage.toLowerCase();
+  if (/\bsql\b/.test(msg) || /\bsqlite\b/.test(msg)) return "sql";
   if (/\bc\+\+\b/.test(msg) || /\bcpp\b/.test(msg)) return "cpp";
   if (/\bpython\b/.test(msg)) return "python";
   if (/\bjava\b/.test(msg)) return "java";
@@ -97,10 +98,11 @@ function extractExplicitLanguage(userMessage: string): "java" | "python" | "cpp"
 
 function isLanguageSwitchConfirmed(userMessage: string): boolean {
   const msg = userMessage.trim().toLowerCase();
-  if (msg === "python" || msg === "java" || msg === "cpp" || msg === "c++") return true;
+  if (msg === "python" || msg === "java" || msg === "cpp" || msg === "c++" || msg === "sql" || msg === "sqlite")
+    return true;
   // Require both a confirmation-ish phrase and an explicit language mention.
   const hasConfirmWord = /\b(yes|yep|sure|ok|okay|confirm|proceed|switch|change|use|go with)\b/.test(msg);
-  const hasLanguage = /\b(python|java|cpp)\b/.test(msg) || /\bc\+\+\b/.test(msg);
+  const hasLanguage = /\b(python|java|cpp|sql|sqlite)\b/.test(msg) || /\bc\+\+\b/.test(msg);
   return hasConfirmWord && hasLanguage;
 }
 
@@ -224,7 +226,7 @@ ${JSON.stringify(locked)}
 Output JSON schema:
 {
   "inferredPatch": {
-    "language"?: "java" | "python" | "cpp",
+    "language"?: "java" | "python" | "cpp" | "sql",
     "problem_count"?: number,
     "difficulty_plan"?: [{"difficulty":"easy|medium|hard","count":number}, ...],
     "topic_tags"?: string[],
@@ -411,7 +413,10 @@ export async function resolveIntentWithLLM(args: {
   const currentLanguage = args.currentSpec.language;
   const effectiveCurrentLanguage = currentLanguage ?? "java";
 
-  const applyLanguagePatch = (language: "java" | "python" | "cpp", rationale: string): IntentResolutionResult => {
+  const applyLanguagePatch = (
+    language: "java" | "python" | "cpp" | "sql",
+    rationale: string
+  ): IntentResolutionResult => {
     const output: IntentResolutionOutput = {
       inferredPatch: { language },
       confidence: { language: 1 },
