@@ -54,7 +54,7 @@ async function runCppJudgeFiles(userFiles, testSuite) {
             "docker run --rm",
             "--network none",
             "--read-only",
-            "--tmpfs /tmp:rw",
+            "--tmpfs /tmp:rw,exec",
             `-v ${tmp}:/workspace:ro`,
             "--workdir /workspace",
             "--entrypoint /bin/bash",
