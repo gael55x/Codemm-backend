@@ -6,6 +6,7 @@ import {
   hasBrittleWhitespaceStringExpectations,
   isValidJUnit5TestSuite,
 } from "../languages/java/rules";
+import { diagnoseCppTestSuite } from "../languages/cpp/rules";
 import { GeneratedProblemDraftSchema, type GeneratedProblemDraft } from "../contracts/problem";
 import type { ProblemSlot } from "../planner/types";
 import { buildSlotPromptWithContext, getSystemPromptForSlot } from "./prompts";
@@ -51,15 +52,31 @@ Your job:
 Hard rules:
 - Return ONLY valid JSON (no markdown, no code fences, no prose)
 - Output schema: { "test_suite": "..." }
-- test_suite must:
-  - #include <bits/stdc++.h>
-  - #include "solution.cpp"
-  - define: static int __codem_failures = 0;
-  - define a VARIADIC macro:
-    #define RUN_TEST(name, ...) do { ... __VA_ARGS__ ... } while(0)
-  - call RUN_TEST exactly 8 times: "test_case_1".."test_case_8"
-  - print exactly one line per test: [PASS] test_case_N or [FAIL] test_case_N
-  - return non-zero if any failures occurred
+- test_suite must be based on this exact template (copy/paste; only edit inside the TODO blocks):
+  #include <bits/stdc++.h>
+  #include "solution.cpp"
+
+  static int __codem_failures = 0;
+  #define RUN_TEST(name, ...) do { \\
+    try { __VA_ARGS__; std::cout << "[PASS] " << (name) << "\\\\n"; } \\
+    catch (const std::exception&) { std::cout << "[FAIL] " << (name) << "\\\\n"; __codem_failures++; } \\
+    catch (...) { std::cout << "[FAIL] " << (name) << "\\\\n"; __codem_failures++; } \\
+  } while (0)
+
+  int main() {
+    RUN_TEST("test_case_1", { /* TODO */ });
+    RUN_TEST("test_case_2", { /* TODO */ });
+    RUN_TEST("test_case_3", { /* TODO */ });
+    RUN_TEST("test_case_4", { /* TODO */ });
+    RUN_TEST("test_case_5", { /* TODO */ });
+    RUN_TEST("test_case_6", { /* TODO */ });
+    RUN_TEST("test_case_7", { /* TODO */ });
+    RUN_TEST("test_case_8", { /* TODO */ });
+    return __codem_failures ? 1 : 0;
+  }
+
+Additional rules:
+- Each TODO block must contain deterministic assertions (use std::runtime_error on failure).
 `.trim();
 
   const user = `
@@ -99,6 +116,7 @@ Return JSON: {"test_suite":"..."} only.
   });
 
   const text = completion.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
+  traceText("generation.cpp.testSuite.repair.raw", text, { extra: { slotIndex: args.slot.index } });
   const parsed = tryParseJson(text) as any;
   const repaired = typeof parsed?.test_suite === "string" ? parsed.test_suite.trim() : "";
   if (!repaired) throw new Error("C++ test_suite repair failed: missing test_suite.");
@@ -552,15 +570,28 @@ export async function generateSingleProblem(
 
       let result = GeneratedProblemDraftSchema.safeParse(draft);
       if (!result.success) {
+        const testSuiteIssue = result.error.issues.some((i) => i.path?.[0] === "test_suite");
+        const diagnostics = testSuiteIssue ? diagnoseCppTestSuite(draft.test_suite, 8) : undefined;
+        if (diagnostics) {
+          const maybeIncludeSnippet = process.env.CODEMM_TRACE_TEST_SUITES === "1";
+          trace("generation.cpp.testSuite.invalid", {
+            slotIndex: slot.index,
+            checks: diagnostics,
+            ...(maybeIncludeSnippet ? { testSuiteSnippet: draft.test_suite.slice(0, 2000) } : {}),
+          });
+        }
+
         const msg =
           result.error.issues
             .slice(0, 6)
             .map((i) => `${i.path?.length ? i.path.join(".") : "root"}: ${i.message}`)
             .join(" | ") || "unknown error";
+        const msgWithDiagnostics =
+          diagnostics ? `${msg} | cpp_test_suite_checks=${JSON.stringify(diagnostics)}` : msg;
 
         // One deterministic self-heal pass: if only test_suite is invalid, ask the LLM to repair the test suite
         // (keeps the overall problem stable while enforcing the strict harness contract).
-        const failedTestSuite = result.error.issues.some((i) => i.path?.[0] === "test_suite");
+        const failedTestSuite = testSuiteIssue;
         if (failedTestSuite) {
           const repairedTestSuite = await repairCppTestSuite({
             slot,
@@ -570,7 +601,7 @@ export async function generateSingleProblem(
             starterCode,
             referenceSolution,
             previousTestSuite: testSuite,
-            errorMessage: msg,
+            errorMessage: msgWithDiagnostics,
           });
           const repairedDraft: GeneratedProblemDraft = { ...draft, test_suite: repairedTestSuite };
           result = GeneratedProblemDraftSchema.safeParse(repairedDraft);
@@ -578,9 +609,23 @@ export async function generateSingleProblem(
             trace("generation.cpp.testSuite.repaired", { slotIndex: slot.index, title });
             return { draft: result.data, meta: { llmOutputHash } };
           }
+
+          const repairedDiagnostics = diagnoseCppTestSuite(repairedTestSuite, 8);
+          const maybeIncludeSnippet = process.env.CODEMM_TRACE_TEST_SUITES === "1";
+          trace("generation.cpp.testSuite.repair_invalid", {
+            slotIndex: slot.index,
+            checks: repairedDiagnostics,
+            ...(maybeIncludeSnippet ? { testSuiteSnippet: repairedTestSuite.slice(0, 2000) } : {}),
+          });
+
+          throw new Error(
+            `Generated problem for slot ${slot.index} failed schema validation after C++ test_suite repair: ${msgWithDiagnostics} | repaired_cpp_test_suite_checks=${JSON.stringify(repairedDiagnostics)}`
+          );
         }
 
-        throw new Error(`Generated problem for slot ${slot.index} failed schema validation: ${msg}`);
+        throw new Error(
+          `Generated problem for slot ${slot.index} failed schema validation: ${msgWithDiagnostics}`
+        );
       }
 
       trace("generation.draft.meta", { slotIndex: slot.index, title, language: "cpp", difficulty, topicTag });

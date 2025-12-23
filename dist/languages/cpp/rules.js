@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CppSourceSchema = void 0;
+exports.diagnoseCppTestSuite = diagnoseCppTestSuite;
 exports.isValidCppTestSuite = isValidCppTestSuite;
 const zod_1 = require("zod");
 function stripCppComments(source) {
@@ -25,12 +26,10 @@ exports.CppSourceSchema = zod_1.z
         });
     }
 });
-function isValidCppTestSuite(testSuite, testCount) {
-    const s = stripCppComments(testSuite);
-    if (!/#include\s+"solution\.cpp"/.test(s))
-        return false;
-    if (!/\bint\s+main\s*\(/.test(s))
-        return false;
+function diagnoseCppTestSuite(testSuite, testCount) {
+    const s = stripCppComments(testSuite ?? "");
+    const includesSolutionCpp = /#\s*include\s+"solution\.cpp"/.test(s);
+    const hasMain = /\bint\s+main\s*\(/.test(s);
     const found = new Set();
     const collect = (re) => {
         let m;
@@ -50,21 +49,32 @@ function isValidCppTestSuite(testSuite, testCount) {
     if (found.size === 0) {
         collect(/\b(?:void|bool|int)\s+test_case_(\d+)\s*\(/g);
     }
-    if (found.size !== testCount)
-        return false;
-    for (let i = 1; i <= testCount; i++) {
-        if (!found.has(i))
-            return false;
-    }
+    const foundTestNumbers = Array.from(found).sort((a, b) => a - b);
+    const hasAllTests = found.size === testCount && Array.from({ length: testCount }, (_, i) => i + 1).every((n) => found.has(n));
     // If using RUN_TEST, require it to be variadic to avoid comma parsing failures.
-    if (/\bRUN_TEST\s*\(/.test(s)) {
-        const hasVariadic = /^\s*#\s*define\s+RUN_TEST\s*\([^)]*\.\.\.[^)]*\)/m.test(s);
-        if (!hasVariadic)
-            return false;
-    }
+    const hasRunTestCalls = /\bRUN_TEST\s*\(/.test(s);
+    const hasVariadicRunTestMacro = !hasRunTestCalls
+        ? true
+        : /^\s*#\s*define\s+RUN_TEST\s*\([^)]*\.\.\.[^)]*\)/m.test(s);
     // Ensure the runner prints parseable status lines.
-    if (!/\[(PASS|FAIL)\]/.test(s))
-        return false;
-    return true;
+    const hasPassFailOutput = /\[(PASS|FAIL)\]/.test(s);
+    return {
+        includesSolutionCpp,
+        hasMain,
+        hasRunTestCalls,
+        hasVariadicRunTestMacro,
+        hasPassFailOutput,
+        foundTestNumbers,
+    };
+}
+function isValidCppTestSuite(testSuite, testCount) {
+    const d = diagnoseCppTestSuite(testSuite, testCount);
+    const hasAllTests = d.foundTestNumbers.length === testCount &&
+        Array.from({ length: testCount }, (_, i) => i + 1).every((n) => d.foundTestNumbers.includes(n));
+    return (d.includesSolutionCpp &&
+        d.hasMain &&
+        hasAllTests &&
+        d.hasVariadicRunTestMacro &&
+        d.hasPassFailOutput);
 }
 //# sourceMappingURL=rules.js.map

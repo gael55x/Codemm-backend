@@ -24,11 +24,20 @@ export const CppSourceSchema = z
     }
   });
 
-export function isValidCppTestSuite(testSuite: string, testCount: number): boolean {
-  const s = stripCppComments(testSuite);
+export type CppTestSuiteDiagnostics = {
+  includesSolutionCpp: boolean;
+  hasMain: boolean;
+  hasRunTestCalls: boolean;
+  hasVariadicRunTestMacro: boolean;
+  hasPassFailOutput: boolean;
+  foundTestNumbers: number[];
+};
 
-  if (!/#include\s+"solution\.cpp"/.test(s)) return false;
-  if (!/\bint\s+main\s*\(/.test(s)) return false;
+export function diagnoseCppTestSuite(testSuite: string, testCount: number): CppTestSuiteDiagnostics {
+  const s = stripCppComments(testSuite ?? "");
+
+  const includesSolutionCpp = /#\s*include\s+"solution\.cpp"/.test(s);
+  const hasMain = /\bint\s+main\s*\(/.test(s);
 
   const found = new Set<number>();
   const collect = (re: RegExp) => {
@@ -50,19 +59,40 @@ export function isValidCppTestSuite(testSuite: string, testCount: number): boole
     collect(/\b(?:void|bool|int)\s+test_case_(\d+)\s*\(/g);
   }
 
-  if (found.size !== testCount) return false;
-  for (let i = 1; i <= testCount; i++) {
-    if (!found.has(i)) return false;
-  }
+  const foundTestNumbers = Array.from(found).sort((a, b) => a - b);
+  const hasAllTests =
+    found.size === testCount && Array.from({ length: testCount }, (_, i) => i + 1).every((n) => found.has(n));
 
   // If using RUN_TEST, require it to be variadic to avoid comma parsing failures.
-  if (/\bRUN_TEST\s*\(/.test(s)) {
-    const hasVariadic = /^\s*#\s*define\s+RUN_TEST\s*\([^)]*\.\.\.[^)]*\)/m.test(s);
-    if (!hasVariadic) return false;
-  }
+  const hasRunTestCalls = /\bRUN_TEST\s*\(/.test(s);
+  const hasVariadicRunTestMacro = !hasRunTestCalls
+    ? true
+    : /^\s*#\s*define\s+RUN_TEST\s*\([^)]*\.\.\.[^)]*\)/m.test(s);
 
   // Ensure the runner prints parseable status lines.
-  if (!/\[(PASS|FAIL)\]/.test(s)) return false;
+  const hasPassFailOutput = /\[(PASS|FAIL)\]/.test(s);
 
-  return true;
+  return {
+    includesSolutionCpp,
+    hasMain,
+    hasRunTestCalls,
+    hasVariadicRunTestMacro,
+    hasPassFailOutput,
+    foundTestNumbers,
+  };
+}
+
+export function isValidCppTestSuite(testSuite: string, testCount: number): boolean {
+  const d = diagnoseCppTestSuite(testSuite, testCount);
+  const hasAllTests =
+    d.foundTestNumbers.length === testCount &&
+    Array.from({ length: testCount }, (_, i) => i + 1).every((n) => d.foundTestNumbers.includes(n));
+
+  return (
+    d.includesSolutionCpp &&
+    d.hasMain &&
+    hasAllTests &&
+    d.hasVariadicRunTestMacro &&
+    d.hasPassFailOutput
+  );
 }
