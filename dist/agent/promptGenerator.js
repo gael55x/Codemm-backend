@@ -45,32 +45,30 @@ function valueToShortString(value) {
 function buildRevisionLine(update) {
     if (!update)
         return null;
-    const priority = [
-        "problem_count",
-        "language",
-        "topic_tags",
-        "problem_style",
-        "difficulty_plan",
-    ];
-    const key = priority.find((k) => update.changed[k] != null) ?? null;
-    if (!key)
+    const parts = [];
+    const count = update.changed.problem_count;
+    if (count && typeof count.from === "number" && typeof count.to === "number") {
+        parts.push(`do ${count.to} problems instead of ${count.from}`);
+    }
+    const lang = update.changed.language;
+    if (lang && typeof lang.from === "string" && typeof lang.to === "string") {
+        parts.push(`use ${lang.to.toUpperCase()} instead of ${lang.from.toUpperCase()}`);
+    }
+    const topics = update.changed.topic_tags;
+    if (topics && Array.isArray(topics.to)) {
+        parts.push(`focus on ${valueToShortString(topics.to)}`);
+    }
+    const style = update.changed.problem_style;
+    if (style && typeof style.to === "string") {
+        parts.push(`use ${style.to} style`);
+    }
+    if (parts.length === 0)
         return null;
-    const change = update.changed[key];
-    if (!change)
-        return null;
-    if (key === "problem_count" && typeof change.from === "number" && typeof change.to === "number") {
-        return `Got it — we’ll do ${change.to} problems instead of ${change.from}.`;
-    }
-    if (key === "language" && typeof change.from === "string" && typeof change.to === "string") {
-        return `Got it — we’ll use ${change.to.toUpperCase()} instead of ${change.from.toUpperCase()}.`;
-    }
-    if (key === "topic_tags" && Array.isArray(change.to)) {
-        return `Got it — we’ll focus on ${valueToShortString(change.to)}.`;
-    }
-    if (key === "problem_style" && typeof change.to === "string") {
-        return `Got it — we’ll use ${change.to} style.`;
-    }
-    return null;
+    if (parts.length === 1)
+        return `Got it — we’ll ${parts[0]}.`;
+    if (parts.length === 2)
+        return `Got it — we’ll ${parts[0]} and ${parts[1]}.`;
+    return `Got it — we’ll ${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}.`;
 }
 function generateNextPrompt(args) {
     const known = formatKnown(args.spec);
