@@ -17,6 +17,68 @@ const javaSource_1 = require("../utils/javaSource");
 const CODEX_MODEL = process.env.CODEX_MODEL ?? "gpt-4.1";
 const MAX_TOKENS = 5000;
 const TEMPERATURE = 0.3;
+async function repairCppTestSuite(args) {
+    const system = `
+You are Codemm's C++ test suite repairer.
+
+Your job:
+- Produce a VALID C++20 test.cpp for a problem, using the required harness.
+- The test suite MUST compile against solution.cpp and MUST be deterministic.
+
+Hard rules:
+- Return ONLY valid JSON (no markdown, no code fences, no prose)
+- Output schema: { "test_suite": "..." }
+- test_suite must:
+  - #include <bits/stdc++.h>
+  - #include "solution.cpp"
+  - define: static int __codem_failures = 0;
+  - define a VARIADIC macro:
+    #define RUN_TEST(name, ...) do { ... __VA_ARGS__ ... } while(0)
+  - call RUN_TEST exactly 8 times: "test_case_1".."test_case_8"
+  - print exactly one line per test: [PASS] test_case_N or [FAIL] test_case_N
+  - return non-zero if any failures occurred
+`.trim();
+    const user = `
+Slot:
+${JSON.stringify({ difficulty: args.slot.difficulty, topics: args.slot.topics, style: args.slot.problem_style })}
+
+Title:
+${args.title}
+
+Description:
+${args.description}
+
+Constraints:
+${args.constraints}
+
+Starter code (learner edits):
+${args.starterCode}
+
+Reference solution (must pass all tests):
+${args.referenceSolution}
+
+Previous invalid test_suite:
+${args.previousTestSuite}
+
+Error:
+${args.errorMessage}
+
+Return JSON: {"test_suite":"..."} only.
+`.trim();
+    const completion = await (0, codex_1.createCodexCompletion)({
+        system,
+        user,
+        model: CODEX_MODEL,
+        temperature: 0.2,
+        maxTokens: 2400,
+    });
+    const text = completion.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
+    const parsed = (0, jsonParser_1.tryParseJson)(text);
+    const repaired = typeof parsed?.test_suite === "string" ? parsed.test_suite.trim() : "";
+    if (!repaired)
+        throw new Error("C++ test_suite repair failed: missing test_suite.");
+    return repaired;
+}
 function sha256(text) {
     return crypto_1.default.createHash("sha256").update(text).digest("hex");
 }
@@ -307,9 +369,8 @@ async function generateSingleProblem(slot, opts) {
                 starterCode = "def solve(x):\n    # TODO: implement\n    raise NotImplementedError\n";
             }
             const testSuite = typeof raw.test_suite === "string" && raw.test_suite.trim() ? raw.test_suite.trim() : "";
-            if (!testSuite.trim()) {
-                throw new Error(`Invalid test_suite for slot ${slot.index}: missing.`);
-            }
+            // Note: if the LLM omitted test_suite (or returned an invalid one), we attempt a one-shot
+            // repair later after schema validation.
             const referenceSolution = typeof raw.reference_solution === "string" && raw.reference_solution.trim()
                 ? raw.reference_solution.trim()
                 : "";
@@ -400,10 +461,34 @@ async function generateSingleProblem(slot, opts) {
                 difficulty,
                 topic_tag: topicTag,
             };
-            const result = problem_1.GeneratedProblemDraftSchema.safeParse(draft);
+            let result = problem_1.GeneratedProblemDraftSchema.safeParse(draft);
             if (!result.success) {
-                const firstError = result.error.issues[0];
-                throw new Error(`Generated problem for slot ${slot.index} failed schema validation: ${firstError?.message ?? "unknown error"}`);
+                const msg = result.error.issues
+                    .slice(0, 6)
+                    .map((i) => `${i.path?.length ? i.path.join(".") : "root"}: ${i.message}`)
+                    .join(" | ") || "unknown error";
+                // One deterministic self-heal pass: if only test_suite is invalid, ask the LLM to repair the test suite
+                // (keeps the overall problem stable while enforcing the strict harness contract).
+                const failedTestSuite = result.error.issues.some((i) => i.path?.[0] === "test_suite");
+                if (failedTestSuite) {
+                    const repairedTestSuite = await repairCppTestSuite({
+                        slot,
+                        title,
+                        description,
+                        constraints,
+                        starterCode,
+                        referenceSolution,
+                        previousTestSuite: testSuite,
+                        errorMessage: msg,
+                    });
+                    const repairedDraft = { ...draft, test_suite: repairedTestSuite };
+                    result = problem_1.GeneratedProblemDraftSchema.safeParse(repairedDraft);
+                    if (result.success) {
+                        (0, trace_1.trace)("generation.cpp.testSuite.repaired", { slotIndex: slot.index, title });
+                        return { draft: result.data, meta: { llmOutputHash } };
+                    }
+                }
+                throw new Error(`Generated problem for slot ${slot.index} failed schema validation: ${msg}`);
             }
             (0, trace_1.trace)("generation.draft.meta", { slotIndex: slot.index, title, language: "cpp", difficulty, topicTag });
             return { draft: result.data, meta: { llmOutputHash } };
