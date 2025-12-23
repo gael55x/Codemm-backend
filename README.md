@@ -42,6 +42,16 @@ C++ grading uses a custom `test.cpp` runner inside Docker. The generator enforce
 
 This avoids C preprocessor “macro passed N arguments” errors caused by commas inside test blocks.
 
+## Debug tracing
+
+Tracing is opt-in and disabled by default.
+
+- Enable trace events: `CODEMM_TRACE=1`
+- Stream trace events (SSE): `GET /sessions/:id/trace`
+- Include C++ test suite snippets in trace payloads (for generator debugging): `CODEMM_TRACE_TEST_SUITES=1`
+
+Note: the trace stream intentionally omits prompts, raw generations, and reference solutions.
+
 ### Persisted agent memory (auditable)
 
 - `commitments_json`: accepted field/value decisions, with explicit/implicit source + locking.
