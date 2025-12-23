@@ -2,6 +2,7 @@ import { z } from "zod";
 import { JavaSourceNoPackageSchema, isValidJUnit5TestSuite } from "../languages/java/rules";
 import { PythonSourceSchema, isValidPytestTestSuite } from "../languages/python/rules";
 import { CppSourceSchema, isValidCppTestSuite } from "../languages/cpp/rules";
+import { SqlQuerySchema, isValidSqlTestSuite } from "../languages/sql/rules";
 
 function stripJavaComments(source: string): string {
   const withoutBlockComments = source.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -87,6 +88,19 @@ const CppTestSuiteSchema = z
         code: z.ZodIssueCode.custom,
         message:
           'Invalid test_suite: must #include "solution.cpp", define a main(), and include exactly 8 RUN_TEST("test_case_1".."test_case_8", ...) tests with deterministic assertions.',
+      });
+    }
+  });
+
+const SqlTestSuiteSchema = z
+  .string()
+  .min(1)
+  .superRefine((ts, ctx) => {
+    if (!isValidSqlTestSuite(ts, 8)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Invalid test_suite: must be JSON with schema_sql + exactly 8 cases named test_case_1..test_case_8 including expected columns/rows.",
       });
     }
   });
@@ -216,11 +230,19 @@ const CppDraftSchema = CommonProblemFieldsSchema.extend({
   reference_solution: CppSourceSchema,
 }).strict();
 
+const SqlDraftSchema = CommonProblemFieldsSchema.extend({
+  language: z.literal("sql"),
+  test_suite: SqlTestSuiteSchema,
+  starter_code: SqlQuerySchema,
+  reference_solution: SqlQuerySchema,
+}).strict();
+
 export const GeneratedProblemDraftSchema = z.union([
   LegacyDraftSchema,
   WorkspaceDraftSchema,
   PythonDraftSchema,
   CppDraftSchema,
+  SqlDraftSchema,
 ]);
 
 export type GeneratedProblemDraft = z.infer<typeof GeneratedProblemDraftSchema>;
@@ -233,6 +255,7 @@ export const GeneratedProblemSchema = z.union([
   WorkspaceDraftSchemaBase.omit({ reference_workspace: true }).superRefine(refineWorkspaceProblem),
   PythonDraftSchema.omit({ reference_solution: true }),
   CppDraftSchema.omit({ reference_solution: true }),
+  SqlDraftSchema.omit({ reference_solution: true }),
 ]);
 
 export type GeneratedProblem = z.infer<typeof GeneratedProblemSchema>;

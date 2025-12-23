@@ -220,9 +220,62 @@ Goal:
 Return ONLY valid JSON. No markdown. No code fences. No prose.`;
 }
 
+function buildSqlRepairPrompt(slot: ProblemSlot, repair: RepairContext, ctx?: SlotPromptContext): string {
+  const previousJson =
+    repair.previousDraft != null ? JSON.stringify(repair.previousDraft, null, 2) : null;
+  const stdoutSnippet = (repair.judgeStdout ?? "").slice(0, 1600);
+  const stderrSnippet = (repair.judgeStderr ?? "").slice(0, 1600);
+  const rawSnippet = (repair.previousRaw ?? "").slice(0, 2400);
+  const errorMessage = (repair.errorMessage ?? "").slice(0, 600);
+
+  return `You previously generated a problem JSON for this slot, but the reference_solution FAILED when executed against the test_suite in Docker/SQLite.
+
+Slot requirements:
+- Difficulty: ${slot.difficulty}
+- Topics: ${slot.topics.join(", ")}
+- Problem style: ${slot.problem_style}
+- Constraints: ${slot.constraints}
+- SQLite 3
+- test_suite must be valid JSON with schema_sql + exactly 8 cases: test_case_1..test_case_8
+
+${ctx?.domain ? `\nScenario seed: ${ctx.domain}\n` : ""}
+${ctx?.avoidDomains?.length ? `Avoid repeating domains: ${ctx.avoidDomains.join(", ")}\n` : ""}
+${ctx?.avoidTitles?.length ? `Avoid reusing titles too similar to: ${ctx.avoidTitles.join(" | ")}\n` : ""}
+
+Failure output:
+STDOUT:
+${stdoutSnippet || "(empty)"}
+
+STDERR:
+${stderrSnippet || "(empty)"}
+
+Error reason:
+${errorMessage || "(not provided)"}
+
+Hard structure rules (do not violate):
+- starter_code and reference_solution must be a single read-only query (WITH/SELECT only)
+- test_suite must be valid JSON (not code); include schema_sql + 8 cases
+- Each case expected.columns must match actual output column names
+- If order matters, set order_matters=true and include ORDER BY in the query
+
+Here is your previous output (may be truncated):
+${rawSnippet || "(not provided)"}
+
+Here is your previous JSON (preferred to edit if present):
+${previousJson || "(not provided)"}
+
+Goal:
+- Return corrected JSON with the exact same fields.
+- Prefer keeping id/title/description/starter_code stable.
+- You MAY update test_suite and/or reference_solution, but the final pair MUST pass in Docker/SQLite.
+
+Return ONLY valid JSON. No markdown. No code fences. No prose.`;
+}
+
 function buildRepairPrompt(slot: ProblemSlot, repair: RepairContext, ctx?: SlotPromptContext): string {
   if (slot.language === "python") return buildPythonRepairPrompt(slot, repair, ctx);
   if (slot.language === "cpp") return buildCppRepairPrompt(slot, repair, ctx);
+  if (slot.language === "sql") return buildSqlRepairPrompt(slot, repair, ctx);
   return buildJavaRepairPrompt(slot, repair, ctx);
 }
 
@@ -431,6 +484,85 @@ export async function generateSingleProblem(
       }
 
       trace("generation.draft.meta", { slotIndex: slot.index, title, language: "cpp", difficulty, topicTag });
+      return { draft: result.data, meta: { llmOutputHash } };
+    }
+
+    if (slot.language === "sql") {
+      if (raw.workspace || raw.reference_workspace) {
+        throw new Error("SQL generation does not support workspace problems.");
+      }
+
+      const baseId =
+        typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : crypto.randomUUID();
+
+      const title =
+        typeof raw.title === "string" && raw.title.trim()
+          ? raw.title.trim()
+          : `Problem for ${slot.topics[0] ?? "SQL"}`;
+
+      const description =
+        typeof raw.description === "string" && raw.description.trim()
+          ? raw.description.trim()
+          : `Problem description for ${title}.`;
+
+      let starterCode =
+        typeof raw.starter_code === "string" && raw.starter_code.trim() ? raw.starter_code.trim() : "";
+      if (!starterCode.trim()) starterCode = "SELECT 1;";
+
+      const testSuite =
+        typeof raw.test_suite === "string" && raw.test_suite.trim() ? raw.test_suite.trim() : "";
+      if (!testSuite.trim()) {
+        throw new Error(`Invalid test_suite for slot ${slot.index}: missing.`);
+      }
+
+      const referenceSolution =
+        typeof raw.reference_solution === "string" && raw.reference_solution.trim()
+          ? raw.reference_solution.trim()
+          : "";
+      if (!referenceSolution.trim()) {
+        throw new Error(`Missing reference_solution for slot ${slot.index}.`);
+      }
+
+      const constraints =
+        typeof raw.constraints === "string" && raw.constraints.trim()
+          ? raw.constraints.trim()
+          : slot.constraints;
+
+      const sampleInputs = Array.isArray(raw.sample_inputs)
+        ? (raw.sample_inputs as string[])
+        : [];
+
+      const sampleOutputs = Array.isArray(raw.sample_outputs)
+        ? (raw.sample_outputs as string[])
+        : [];
+
+      const difficulty = slot.difficulty;
+      const topicTag = slot.topics[0] ?? "oop";
+
+      const draft: GeneratedProblemDraft = {
+        language: "sql",
+        id: baseId,
+        title,
+        description,
+        starter_code: starterCode,
+        test_suite: testSuite,
+        reference_solution: referenceSolution,
+        constraints,
+        sample_inputs: sampleInputs,
+        sample_outputs: sampleOutputs,
+        difficulty,
+        topic_tag: topicTag,
+      };
+
+      const result = GeneratedProblemDraftSchema.safeParse(draft);
+      if (!result.success) {
+        const firstError = result.error.issues[0];
+        throw new Error(
+          `Generated problem for slot ${slot.index} failed schema validation: ${firstError?.message ?? "unknown error"}`
+        );
+      }
+
+      trace("generation.draft.meta", { slotIndex: slot.index, title, language: "sql", difficulty, topicTag });
       return { draft: result.data, meta: { llmOutputHash } };
     }
 

@@ -20,4 +20,5 @@ __exportStar(require("./problem"), exports);
 __exportStar(require("../languages/java/rules"), exports);
 __exportStar(require("../languages/python/rules"), exports);
 __exportStar(require("../languages/cpp/rules"), exports);
+__exportStar(require("../languages/sql/rules"), exports);
 //# sourceMappingURL=index.js.map
