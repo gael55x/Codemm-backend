@@ -1,6 +1,14 @@
 import { z } from "zod";
 import { DifficultySchema, ActivityLanguageSchema, CODEMM_DEFAULT_TEST_CASE_COUNT } from "../contracts/activitySpec";
 
+const SlotPedagogySchema = z
+  .object({
+    scaffold_level: z.number().int().min(0).max(100).optional(),
+    learning_goal: z.string().trim().min(1).max(240).optional(),
+    hints_enabled: z.boolean().optional(),
+  })
+  .strict();
+
 export const ProblemSlotSchema = z
   .object({
     index: z.number().int().min(0).max(6),
@@ -10,6 +18,7 @@ export const ProblemSlotSchema = z
     problem_style: z.string().trim().min(1).max(64),
     constraints: z.string().trim().min(1).max(2000),
     test_case_count: z.literal(CODEMM_DEFAULT_TEST_CASE_COUNT),
+    pedagogy: SlotPedagogySchema.optional(),
   })
   .strict();
 

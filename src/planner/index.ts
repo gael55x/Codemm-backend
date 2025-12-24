@@ -80,15 +80,34 @@ export function deriveProblemPlan(spec: ActivitySpec, _pedagogyPolicy?: Pedagogy
 
   const topicAssignments = distributTopics(spec, spec.problem_count);
 
-  const slots: ProblemSlot[] = difficulties.map((difficulty, index) => ({
-    index,
-    difficulty,
-    topics: topicAssignments[index] ?? [],
-    language: spec.language,
-    problem_style: spec.problem_style,
-    constraints: spec.constraints,
-    test_case_count: spec.test_case_count,
-  }));
+  const policy = _pedagogyPolicy;
+  const slots: ProblemSlot[] = difficulties.map((difficulty, index) => {
+    const topics = topicAssignments[index] ?? [];
+    const focus = policy?.mode === "guided" && Array.isArray(policy.focus_concepts) ? policy.focus_concepts : [];
+    const focusIndex = focus.length > 0 ? index % focus.length : 0;
+    const curveValue = policy?.mode === "guided" ? policy.scaffold_curve?.[index] : undefined;
+    const pedagogy =
+      policy?.mode === "guided"
+        ? {
+            scaffold_level: Number.isFinite(curveValue)
+              ? Math.max(0, Math.min(100, Math.floor(curveValue as number)))
+              : undefined,
+            learning_goal: (focus[focusIndex] ?? topics[0]) || undefined,
+            hints_enabled: policy.hints_enabled,
+          }
+        : undefined;
+
+    return {
+      index,
+      difficulty,
+      topics,
+      language: spec.language,
+      problem_style: spec.problem_style,
+      constraints: spec.constraints,
+      test_case_count: spec.test_case_count,
+      ...(pedagogy ? { pedagogy } : {}),
+    };
+  });
 
   // Validate the resulting plan against contract
   const result = ProblemPlanSchema.safeParse(slots);
