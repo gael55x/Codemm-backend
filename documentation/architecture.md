@@ -46,19 +46,25 @@ The `/sessions/:id/messages` endpoint runs one loop step:
 
 1) **Collector buffer** groups user messages under a stable `questionKey` (prevents “half answers” from being treated as new intent).
    - `src/agent/questionKey.ts`
-2) **Intent inference** calls the LLM to produce a constrained JSON object:
+2) **Dialogue act classification (deterministic)** labels the user’s turn (e.g. `DEFER`, `CONFIRMATION`, `CORRECTION`) to reduce “delulu” loops.
+   - `src/agent/dialogueAct.ts`
+   - If the user defers (“any/whatever”), the backend can apply safe defaults deterministically (with a trace event), instead of repeatedly asking.
+3) **Intent inference** calls the LLM to produce a constrained JSON object:
    - `src/agent/intentResolver.ts`
    - Output is `inferredPatch` + `confidence` + optional `clarificationQuestion`
-3) **Robust parsing** tolerates minor JSON issues (JSON → JSON5 → jsonrepair):
+4) **Robust parsing** tolerates minor JSON issues (JSON → JSON5 → jsonrepair):
    - `src/utils/jsonParser.ts`
-4) **Deterministic patch application** converts `inferredPatch` → JSON Patch ops and applies them:
+5) **Field commitment policy (deterministic)** blocks implicit changes to “hard fields” (e.g. switching language, changing problem count/difficulty plan).
+   - If a hard field change lacks explicit user evidence, the system converts it into a `confirm_required` action instead of patching.
+   - `src/agent/fieldCommitmentPolicy.ts`
+6) **Deterministic patch application** converts `inferredPatch` → JSON Patch ops and applies them:
    - `src/compiler/jsonPatch.ts`
-5) **Invariants** are enforced immediately (non-negotiable fields):
+7) **Invariants** are enforced immediately (non-negotiable fields):
    - `src/compiler/specDraft.ts` (`ensureFixedFields()`)
    - Examples: `version=1.0`, `test_case_count=8`, language-specific `constraints`
-6) **Commitments** persist “locked” decisions (explicit user signals stay stable across turns):
+8) **Commitments** persist “locked” decisions (explicit user signals stay stable across turns):
    - `src/agent/commitments.ts`
-7) **Readiness gates + next question** decide whether the spec is complete enough to generate, and what to ask next:
+9) **Readiness gates + next question** decide whether the spec is complete enough to generate, and what to ask next:
    - `src/agent/readiness.ts`, `src/agent/conversationGoals.ts`, `src/agent/promptGenerator.ts`
 
 ## Deterministic boundaries (why it’s “agentic”, but safe)
@@ -66,6 +72,7 @@ The `/sessions/:id/messages` endpoint runs one loop step:
 - The agent never directly mutates persisted session state; it emits proposals that are validated and applied deterministically.
 - The draft spec is always locally correct *for any fields that are present* (partial specs are allowed, invalid fields are not).
   - `ActivitySpecDraftSchema` in `src/compiler/specDraft.ts`
+- The system does **not** persist or stream chain-of-thought. Observability uses structured trace/progress events only.
 
 ## Generation pipeline (ActivitySpec → persisted problems)
 

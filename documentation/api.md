@@ -28,6 +28,10 @@ Auth header: `Authorization: Bearer <token>`
     - `questionKey`: stable key for collector buffering (e.g. `goal:content`, `invalid:difficulty_plan`)
     - `done`: `true` when spec is ready for generation
     - `spec`: current `SpecDraft`
+    - Optional fields (additive; safe for older clients to ignore):
+      - `assistant_summary`: short “what I understood” summary
+      - `assumptions`: list of deterministic assumptions applied (no prompts, no hidden code)
+      - `next_action`: e.g. `ask_question` | `confirm_required` | `ready_to_generate`
 - `GET /sessions/:id`
   - Debug snapshot (includes `learning_mode`, `commitments`, `generationOutcomes`, and `intentTrace`)
 - `POST /sessions/:id/generate` (auth)
@@ -36,6 +40,30 @@ Auth header: `Authorization: Bearer <token>`
   - SSE progress stream (replays buffered events on connect)
 - `GET /sessions/:id/trace`
   - SSE trace stream (requires `CODEMM_TRACE=1`; sanitized payload)
+
+### Generation progress SSE contract (Phase 2B)
+
+`GET /sessions/:id/generate/stream` emits JSON `data:` events that are safe to stream to learners:
+
+- No prompts
+- No chain-of-thought
+- No hidden reference solutions/workspaces
+
+Event ordering (typical):
+
+- `generation_started` `{ totalSlots, run? }`
+- `slot_started` `{ slotIndex, difficulty, topic, language }`
+- `slot_llm_attempt_started` `{ slotIndex, attempt }`
+- `slot_contract_validated` `{ slotIndex, attempt }`
+- `slot_docker_validation_started` `{ slotIndex, attempt }`
+- `slot_docker_validation_failed` `{ slotIndex, attempt, shortError }`
+- `slot_completed` `{ slotIndex }`
+- `generation_completed` `{ activityId }`
+- `generation_failed` `{ error, slotIndex? }`
+- `heartbeat` `{ ts }` (emitted periodically while generating so the UI never “freezes”)
+
+Backwards compatibility:
+- Older “v1” events may also be emitted alongside the Phase 2B events (`problem_started`, `attempt_started`, `validation_started`, `generation_complete`, etc.).
 
 ### Minimal curl flow
 

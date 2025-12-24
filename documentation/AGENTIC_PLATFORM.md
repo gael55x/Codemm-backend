@@ -237,7 +237,7 @@ flowchart TB
 - Spec invariants are enforced by `ensureFixedFields()` (`version`, `test_case_count=8`, and language-specific `constraints`).
 - Session memory is persisted and auditable: commitments and generation outcomes are stored on the session row.
 - Python generation currently supports **starter_code + reference_solution** (no workspace mode).
-- Progress SSE (`/sessions/:id/generate/stream`) and trace SSE (`/sessions/:id/trace`) do **not** stream prompts or hidden reference artifacts.
+- Progress SSE (`/sessions/:id/generate/stream`) and trace SSE (`/sessions/:id/trace`) do **not** stream prompts, chain-of-thought, or hidden reference artifacts.
 
 ---
 
