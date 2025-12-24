@@ -116,7 +116,11 @@ sessionsRouter.get("/:id/generate/stream", (req, res) => {
   const unsubscribe = subscribeGenerationProgress(id, (ev: GenerationProgressEvent) => {
     try {
       res.write(`data: ${JSON.stringify(ev)}\n\n`);
-      if (ev.type === "generation_complete" || ev.type === "generation_failed") {
+      if (
+        ev.type === "generation_complete" ||
+        ev.type === "generation_completed" ||
+        ev.type === "generation_failed"
+      ) {
         // Allow a final flush before closing.
         setTimeout(() => {
           try {

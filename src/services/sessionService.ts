@@ -917,46 +917,51 @@ export async function generateFromSession(
     const state = s.state as SessionState;
     const learning_mode = parseLearningMode((s as any).learning_mode);
 
-  if (state !== "READY") {
-    const err = new Error(`Cannot generate when session state is ${state}. Expected READY.`);
-    (err as any).status = 409;
-    throw err;
-  }
-
-  // Guard: reject if problems already generated (prevent accidental re-generation)
-  if (s.problems_json && s.problems_json.trim()) {
-    const err = new Error("Session already has generated problems. Cannot re-generate.");
-    (err as any).status = 409;
-    throw err;
-  }
-
-  const existingTrace = parseJsonArray(s.intent_trace_json);
-  const existingConfidence = parseJsonObject(s.confidence_json) as ConfidenceMap;
-
-  const persistTraceEvent = (entry: Record<string, unknown>) => {
-    const nextTrace = appendIntentTrace(existingTrace, entry);
-    sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
-    // Mutate local reference so multiple events in this call don't clobber each other.
-    existingTrace.splice(0, existingTrace.length, ...nextTrace);
-  };
-
-  const persistConfidencePatch = (patch: JsonPatchOp[]) => {
-    const incoming: Record<string, number> = {};
-    for (const op of patch) {
-      const key = op.path.startsWith("/") ? op.path.slice(1) : op.path;
-      if (!key) continue;
-      // System-made adjustments are deterministic; mark as high confidence.
-      incoming[key] = 1;
+    if (state !== "READY") {
+      const err = new Error(`Cannot generate when session state is ${state}. Expected READY.`);
+      (err as any).status = 409;
+      throw err;
     }
-    const next = mergeConfidence(existingConfidence, incoming);
-    sessionDb.updateConfidenceJson(sessionId, JSON.stringify(next));
-    Object.assign(existingConfidence, next);
-  };
+
+    // Guard: reject if problems already generated (prevent accidental re-generation)
+    if (s.problems_json && s.problems_json.trim()) {
+      const err = new Error("Session already has generated problems. Cannot re-generate.");
+      (err as any).status = 409;
+      throw err;
+    }
+
+    const existingTrace = parseJsonArray(s.intent_trace_json);
+    const existingConfidence = parseJsonObject(s.confidence_json) as ConfidenceMap;
+
+    const persistTraceEvent = (entry: Record<string, unknown>) => {
+      const nextTrace = appendIntentTrace(existingTrace, entry);
+      sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
+      // Mutate local reference so multiple events in this call don't clobber each other.
+      existingTrace.splice(0, existingTrace.length, ...nextTrace);
+    };
+
+    const persistConfidencePatch = (patch: JsonPatchOp[]) => {
+      const incoming: Record<string, number> = {};
+      for (const op of patch) {
+        const key = op.path.startsWith("/") ? op.path.slice(1) : op.path;
+        if (!key) continue;
+        // System-made adjustments are deterministic; mark as high confidence.
+        incoming[key] = 1;
+      }
+      const next = mergeConfidence(existingConfidence, incoming);
+      sessionDb.updateConfidenceJson(sessionId, JSON.stringify(next));
+      Object.assign(existingConfidence, next);
+    };
+
+    let progressHeartbeat: NodeJS.Timeout | null = null;
 
     try {
     // Transition to GENERATING (lock)
     transitionOrThrow(state, "GENERATING");
     sessionDb.updateState(sessionId, "GENERATING");
+    progressHeartbeat = setInterval(() => {
+      publishGenerationProgress(sessionId, { type: "heartbeat", ts: new Date().toISOString() });
+    }, 1000);
 
     // Parse and validate ActivitySpec
     const specObj = parseSpecJson(s.spec_json);
@@ -983,6 +988,7 @@ export async function generateFromSession(
       sessionDb.setPlanJson(sessionId, JSON.stringify(plan));
       publishGenerationProgress(sessionId, {
         type: "generation_started",
+        totalSlots: plan.length,
         totalProblems: plan.length,
         run: attempt + 1,
       });
@@ -1088,6 +1094,7 @@ export async function generateFromSession(
     // Transition to SAVED
     transitionOrThrow("GENERATING", "SAVED");
     sessionDb.updateState(sessionId, "SAVED");
+    publishGenerationProgress(sessionId, { type: "generation_completed", activityId });
     publishGenerationProgress(sessionId, { type: "generation_complete", activityId });
 
     if (usedFallback) {
@@ -1111,8 +1118,11 @@ export async function generateFromSession(
       publishGenerationProgress(sessionId, {
         type: "generation_failed",
         error: "Generation failed. Please try again.",
+        ...(err instanceof GenerationSlotFailureError ? { slotIndex: err.slotIndex } : {}),
       });
       throw err;
+    } finally {
+      if (progressHeartbeat) clearInterval(progressHeartbeat);
     }
   });
 }
