@@ -125,6 +125,21 @@ export function initializeDatabase() {
     )
   `);
 
+  // Learner profiles (Phase 2A groundwork; deterministic updates only, no LLM).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS learner_profiles (
+      user_id INTEGER NOT NULL,
+      language TEXT NOT NULL,
+      concept_mastery_json TEXT NOT NULL,
+      recent_failures_json TEXT NOT NULL,
+      preferred_style TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, language),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
   // Create indexes for better performance
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
@@ -185,6 +200,16 @@ export interface DBSession {
   intent_trace_json?: string | null;
   commitments_json?: string | null;
   generation_outcomes_json?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DBLearnerProfile {
+  user_id: number;
+  language: string;
+  concept_mastery_json: string;
+  recent_failures_json: string;
+  preferred_style?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -461,6 +486,38 @@ export const sessionMessageDb = {
       `SELECT * FROM session_messages WHERE session_id = ? ORDER BY created_at ASC`
     );
     return stmt.all(sessionId) as DBSessionMessage[];
+  },
+};
+
+export const learnerProfileDb = {
+  findByUserAndLanguage: (userId: number, language: string): DBLearnerProfile | undefined => {
+    const stmt = db.prepare(`SELECT * FROM learner_profiles WHERE user_id = ? AND language = ?`);
+    return stmt.get(userId, language) as DBLearnerProfile | undefined;
+  },
+
+  upsert: (args: {
+    userId: number;
+    language: string;
+    conceptMasteryJson: string;
+    recentFailuresJson: string;
+    preferredStyle?: string | null;
+  }) => {
+    const stmt = db.prepare(`
+      INSERT INTO learner_profiles (user_id, language, concept_mastery_json, recent_failures_json, preferred_style, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(user_id, language) DO UPDATE SET
+        concept_mastery_json = excluded.concept_mastery_json,
+        recent_failures_json = excluded.recent_failures_json,
+        preferred_style = excluded.preferred_style,
+        updated_at = datetime('now')
+    `);
+    stmt.run(
+      args.userId,
+      args.language,
+      args.conceptMasteryJson,
+      args.recentFailuresJson,
+      args.preferredStyle ?? null
+    );
   },
 };
 
