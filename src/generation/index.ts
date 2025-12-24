@@ -98,6 +98,14 @@ export async function generateProblemsFromPlan(
       avoidTitles: usedTitles.slice(-4),
     };
 
+    const topic = slot.topics[0] ?? "topic";
+    onProgress?.({
+      type: "slot_started",
+      slotIndex: slot.index,
+      difficulty: slot.difficulty,
+      topic,
+      language: slot.language,
+    });
     onProgress?.({ type: "problem_started", index: slot.index, difficulty: slot.difficulty });
     trace("generation.slot.plan", {
       slotIndex: slot.index,
@@ -127,6 +135,7 @@ export async function generateProblemsFromPlan(
       attempts++;
       try {
         trace("generation.attempt.start", { slotIndex: slot.index, attempts });
+        onProgress?.({ type: "slot_llm_attempt_started", slotIndex: slot.index, attempt: attempts });
         onProgress?.({ type: "attempt_started", index: slot.index, attempt: attempts });
         // Step 1: Generate single problem via LLM (includes reference_solution)
         const generated = await generateSingleProblem(slot, {
@@ -136,13 +145,16 @@ export async function generateProblemsFromPlan(
         const draft: GeneratedProblemDraft = generated.draft;
         lastDraft = draft;
         lastLlmOutputHash = generated.meta.llmOutputHash;
+        onProgress?.({ type: "slot_contract_validated", slotIndex: slot.index, attempt: attempts });
 
         // Step 2: Validate reference_solution compiles and passes tests (Docker)
+        onProgress?.({ type: "slot_docker_validation_started", slotIndex: slot.index, attempt: attempts });
         onProgress?.({ type: "validation_started", index: slot.index, attempt: attempts });
         await validateReferenceSolution(draft);
 
         // Step 3: Discard reference_solution (CRITICAL: do not persist)
         problem = discardReferenceArtifacts(draft);
+        onProgress?.({ type: "slot_completed", slotIndex: slot.index });
         onProgress?.({ type: "problem_validated", index: slot.index });
         trace("generation.attempt.success", { slotIndex: slot.index, attempts, title: draft.title });
       } catch (err: any) {
@@ -153,6 +165,12 @@ export async function generateProblemsFromPlan(
         );
 
         if (err instanceof GenerationContractError) {
+          onProgress?.({
+            type: "slot_contract_failed",
+            slotIndex: slot.index,
+            attempt: attempts,
+            shortError: "Contract validation failed.",
+          });
           onProgress?.({ type: "attempt_failed", index: slot.index, attempt: attempts, phase: "generate" });
           lastLlmOutputHash = err.llmOutputHash ?? lastLlmOutputHash;
           repair = {
@@ -162,6 +180,12 @@ export async function generateProblemsFromPlan(
         }
 
         if (err instanceof ReferenceSolutionValidationError && lastDraft) {
+          onProgress?.({
+            type: "slot_docker_validation_failed",
+            slotIndex: slot.index,
+            attempt: attempts,
+            shortError: err.kind === "compile" ? "Compilation failed." : err.kind === "tests" ? "Tests failed." : "Timed out.",
+          });
           onProgress?.({ type: "validation_failed", index: slot.index, attempt: attempts });
           onProgress?.({ type: "attempt_failed", index: slot.index, attempt: attempts, phase: "validate" });
           repair = {

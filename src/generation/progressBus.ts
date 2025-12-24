@@ -30,12 +30,19 @@ export function publishGenerationProgress(sessionId: string, event: GenerationPr
   if (!sessionId) return;
   const channel = getOrCreateChannel(sessionId);
 
-  channel.buffer.push(event);
-  if (channel.buffer.length > 400) {
-    channel.buffer.splice(0, channel.buffer.length - 400);
+  // Don't buffer heartbeats; they are only to keep UI responsive.
+  if (event.type !== "heartbeat") {
+    channel.buffer.push(event);
+    if (channel.buffer.length > 400) {
+      channel.buffer.splice(0, channel.buffer.length - 400);
+    }
   }
 
-  if (event.type === "generation_complete" || event.type === "generation_failed") {
+  if (
+    event.type === "generation_complete" ||
+    event.type === "generation_completed" ||
+    event.type === "generation_failed"
+  ) {
     channel.terminal = true;
     scheduleCleanup(sessionId, channel);
   }
@@ -68,4 +75,3 @@ export function subscribeGenerationProgress(sessionId: string, listener: Listene
     }
   };
 }
-
