@@ -31,6 +31,7 @@ import {
   type CommitmentStore,
 } from "../agent/commitments";
 import { DEFAULT_LEARNING_MODE, LearningModeSchema, type LearningMode } from "../contracts/learningMode";
+import { computeConfirmRequired } from "../agent/fieldCommitmentPolicy";
 
 export type SessionRecord = {
   id: string;
@@ -525,6 +526,48 @@ export async function processSessionMessage(
   }
 
   if (resolved.kind === "patch") {
+    const confirm = computeConfirmRequired({
+      userMessage: combined,
+      currentSpec: specWithFixed as SpecDraft,
+      inferredPatch: (resolved.output as any)?.inferredPatch ?? {},
+    });
+    if (confirm.required) {
+      const nextTrace = appendIntentTrace(existingTrace, {
+        ts: new Date().toISOString(),
+        type: "confirm_required",
+        ...confirm.event,
+      });
+      sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
+      existingTrace.splice(0, existingTrace.length, ...nextTrace);
+
+      const field = confirm.fields[0]!;
+      const assistantText =
+        field === "language"
+          ? `I might be inferring a language switch. Which language should we use? Reply with one: java, python, cpp, sql.`
+          : field === "problem_count"
+          ? "How many problems should this activity have? (1–7)"
+          : "What difficulty spread do you want? Example: easy:2, medium:2, hard:1";
+
+      sessionMessageDb.create(crypto.randomUUID(), sessionId, "assistant", assistantText);
+      sessionDb.updateSpecJson(sessionId, JSON.stringify(specWithFixed));
+      const nextKey = `confirm:${confirm.fields.slice().sort().join(",")}`;
+      persistCollectorState(sessionId, { currentQuestionKey: nextKey, buffer: [] });
+
+      const target: SessionState = "CLARIFYING";
+      transitionOrThrow(state, target);
+      sessionDb.updateState(sessionId, target);
+
+      return {
+        accepted: true,
+        state: target,
+        nextQuestion: assistantText,
+        questionKey: nextKey,
+        done: false,
+        spec: specWithFixed,
+        patch: fixed,
+      };
+    }
+
     const nextSpec = resolved.merged as Record<string, unknown>;
     sessionDb.updateSpecJson(sessionId, JSON.stringify(nextSpec));
 
