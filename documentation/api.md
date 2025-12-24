@@ -20,6 +20,7 @@ Auth header: `Authorization: Bearer <token>`
 
 - `POST /sessions`
   - Creates a new session in `DRAFT`
+  - Optional body: `{ "learning_mode": "practice" | "guided" }` (default: `practice`)
 - `POST /sessions/:id/messages`
   - Body: `{ "message": "..." }`
   - Returns:
@@ -28,7 +29,7 @@ Auth header: `Authorization: Bearer <token>`
     - `done`: `true` when spec is ready for generation
     - `spec`: current `SpecDraft`
 - `GET /sessions/:id`
-  - Debug snapshot (includes `commitments`, `generationOutcomes`, and `intentTrace`)
+  - Debug snapshot (includes `learning_mode`, `commitments`, `generationOutcomes`, and `intentTrace`)
 - `POST /sessions/:id/generate` (auth)
   - Generates + persists an activity when the session is ready
 - `GET /sessions/:id/generate/stream`
@@ -41,7 +42,9 @@ Auth header: `Authorization: Bearer <token>`
 Create:
 
 ```bash
-curl -sS -X POST http://localhost:4000/sessions
+curl -sS -X POST http://localhost:4000/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{"learning_mode":"practice"}'
 ```
 
 Message:
@@ -91,4 +94,3 @@ Body:
 - `testSuite`: string (required)
 - `code` or `files`
 - Optional metadata: `activityId`, `problemId`
-

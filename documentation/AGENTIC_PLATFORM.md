@@ -73,7 +73,7 @@ flowchart TB
   %% -------------------------
   subgraph "Generation Pipeline"
     GEN_VALIDATE["Validate ActivitySpec (strict contract)<br/>src/contracts/activitySpec.ts"]
-    GEN_PLAN["Derive ProblemPlan (deterministic)<br/>deriveProblemPlan()<br/>src/planner/index.ts"]
+    GEN_PLAN["Derive ProblemPlan (deterministic)<br/>deriveProblemPlan(spec, pedagogyPolicy?)<br/>src/planner/index.ts"]
     GEN_PROGRESS["Publish progress events (SSE buffer)<br/>src/generation/progressBus.ts"]
     GEN_SLOT["Per-slot LLM generator + repair prompts<br/>generateSingleProblem()<br/>src/generation/perSlotGenerator.ts"]
     GEN_CONTRACT["Problem contract validation (strict)<br/>GeneratedProblemDraftSchema<br/>src/contracts/problem.ts"]
@@ -256,7 +256,7 @@ flowchart TB
 
   subgraph L1["Layer 1 — Session Orchestration"]
     SVC1["SessionService<br/>state machine + persistence"]
-    DB1["SQLite session row<br/>spec_json + confidence_json<br/>commitments_json + generation_outcomes_json"]
+    DB1["SQLite session row<br/>learning_mode + spec_json + confidence_json<br/>commitments_json + generation_outcomes_json"]
     COL1["Collector buffer<br/>stable questionKey"]
   end
 

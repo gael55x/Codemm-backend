@@ -10,6 +10,7 @@ import { isTraceEnabled } from "../utils/trace";
 import { subscribeTrace } from "../utils/traceBus";
 import { getGenerationProgressBuffer, subscribeGenerationProgress } from "../generation/progressBus";
 import type { GenerationProgressEvent } from "../contracts/generationProgress";
+import { LearningModeSchema } from "../contracts/learningMode";
 
 export const sessionsRouter = Router();
 
@@ -36,10 +37,12 @@ function sanitizeTracePayload(payload: Record<string, unknown>): Record<string, 
   return safe;
 }
 
-sessionsRouter.post("/", (_req, res) => {
+sessionsRouter.post("/", (req, res) => {
   try {
-    const { sessionId, state } = createSession(null);
-    res.status(201).json({ sessionId, state });
+    const parsed = LearningModeSchema.optional().safeParse(req.body?.learning_mode);
+    const learningMode = parsed.success ? parsed.data : undefined;
+    const { sessionId, state, learning_mode } = createSession(null, learningMode);
+    res.status(201).json({ sessionId, state, learning_mode });
   } catch (err: any) {
     console.error("Error in POST /sessions:", err);
     res.status(500).json({ error: "Failed to create session." });
@@ -189,20 +192,21 @@ sessionsRouter.post("/:id/messages", async (req, res) => {
 sessionsRouter.get("/:id", (req, res) => {
   try {
     const id = req.params.id as string;
-  const s = getSession(id);
+    const s = getSession(id);
 
-  res.json({
-    sessionId: s.id,
-    state: s.state,
-    spec: s.spec,
-    messages: s.messages,
-    collector: s.collector,
-    confidence: s.confidence,
-    commitments: s.commitments,
-    generationOutcomes: s.generationOutcomes,
-    intentTrace: s.intentTrace,
-  });
-} catch (err: any) {
+    res.json({
+      sessionId: s.id,
+      state: s.state,
+      learning_mode: s.learning_mode,
+      spec: s.spec,
+      messages: s.messages,
+      collector: s.collector,
+      confidence: s.confidence,
+      commitments: s.commitments,
+      generationOutcomes: s.generationOutcomes,
+      intentTrace: s.intentTrace,
+    });
+  } catch (err: any) {
     const status = typeof err?.status === "number" ? err.status : 500;
     if (status >= 500) {
       console.error("Error in GET /sessions/:id:", err);

@@ -1,4 +1,5 @@
 export * from "./activitySpec";
+export * from "./learningMode";
 export * from "./session";
 export * from "./problem";
 export * from "../languages/java/rules";

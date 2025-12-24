@@ -30,10 +30,12 @@ import {
   upsertCommitment,
   type CommitmentStore,
 } from "../agent/commitments";
+import { DEFAULT_LEARNING_MODE, LearningModeSchema, type LearningMode } from "../contracts/learningMode";
 
 export type SessionRecord = {
   id: string;
   state: SessionState;
+  learning_mode: LearningMode;
   spec: Record<string, unknown>;
   messages: { id: string; role: "user" | "assistant"; content: string; created_at: string }[];
   collector: { currentQuestionKey: string | null; buffer: string[] };
@@ -90,6 +92,11 @@ function parseGenerationOutcomes(json: string | null | undefined): GenerationOut
     });
   }
   return outcomes;
+}
+
+function parseLearningMode(raw: unknown): LearningMode {
+  const parsed = LearningModeSchema.safeParse(raw);
+  return parsed.success ? parsed.data : DEFAULT_LEARNING_MODE;
 }
 
 function mergeConfidence(
@@ -292,19 +299,23 @@ function transitionOrThrow(from: SessionState, to: SessionState) {
   }
 }
 
-export function createSession(userId?: number | null): { sessionId: string; state: SessionState } {
+export function createSession(
+  userId?: number | null,
+  learningMode?: LearningMode
+): { sessionId: string; state: SessionState; learning_mode: LearningMode } {
   const id = crypto.randomUUID();
   const state: SessionState = "DRAFT";
+  const learning_mode: LearningMode = parseLearningMode(learningMode);
 
   const fixed = ensureFixedFields({} as SpecDraft);
   const initialSpec = fixed.length > 0 ? applyJsonPatch({} as any, fixed) : {};
 
   // Contract allows null or {} — DB column is NOT NULL, so we store {}.
-  sessionDb.create(id, state, JSON.stringify(initialSpec), userId ?? null);
+  sessionDb.create(id, state, learning_mode, JSON.stringify(initialSpec), userId ?? null);
   const initialQuestionKey = getDynamicQuestionKey(initialSpec as SpecDraft, {}, null);
   sessionCollectorDb.upsert(id, initialQuestionKey, []);
 
-  return { sessionId: id, state };
+  return { sessionId: id, state, learning_mode };
 }
 
 export function getSession(id: string): SessionRecord {
@@ -316,10 +327,12 @@ export function getSession(id: string): SessionRecord {
   const collector = getCollectorState(id, getDynamicQuestionKey(spec as SpecDraft, confidence as any, commitments));
   const intentTrace = parseJsonArray(s.intent_trace_json).slice(-50);
   const generationOutcomes = parseGenerationOutcomes(s.generation_outcomes_json);
+  const learning_mode = parseLearningMode((s as any).learning_mode);
 
   return {
     id: s.id,
     state: s.state as SessionState,
+    learning_mode,
     spec,
     messages,
     collector,
@@ -357,6 +370,7 @@ export async function processSessionMessage(
   return withTraceContext({ sessionId }, async () => {
     const s = requireSession(sessionId);
     const state = s.state as SessionState;
+    const learning_mode = parseLearningMode((s as any).learning_mode);
     trace("session.message.start", { sessionId, state });
     traceText("session.message.user", message, { extra: { sessionId } });
 
@@ -461,6 +475,7 @@ export async function processSessionMessage(
     currentSpec: specWithFixed as SpecDraft,
     currentQuestionKey: expectedQuestionKey,
     commitments: commitmentsStore,
+    learningMode: learning_mode,
   }).catch((e) => ({ kind: "error" as const, error: e?.message ?? String(e) }));
 
   if ("output" in resolved && resolved.output) {
@@ -706,6 +721,7 @@ export async function generateFromSession(
   return withTraceContext({ sessionId }, async () => {
     const s = requireSession(sessionId);
     const state = s.state as SessionState;
+    const learning_mode = parseLearningMode((s as any).learning_mode);
 
   if (state !== "READY") {
     const err = new Error(`Cannot generate when session state is ${state}. Expected READY.`);
@@ -768,7 +784,8 @@ export async function generateFromSession(
 
     for (let attempt = 0; attempt < 2 && !problems; attempt++) {
       // Derive ProblemPlan (always from current spec)
-      const plan = deriveProblemPlan(spec);
+      const pedagogyPolicy = learning_mode === "guided" ? { mode: "guided" as const } : undefined;
+      const plan = deriveProblemPlan(spec, pedagogyPolicy);
       sessionDb.setPlanJson(sessionId, JSON.stringify(plan));
       publishGenerationProgress(sessionId, {
         type: "generation_started",

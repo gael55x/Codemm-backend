@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ActivitySpecSchema } from "./activitySpec";
+import { LearningModeSchema } from "./learningMode";
 
 export const SessionStateSchema = z.enum([
   "DRAFT",
@@ -30,6 +31,7 @@ export const SessionSchema = z
   .object({
     id: z.string().uuid(),
     state: SessionStateSchema,
+    learning_mode: LearningModeSchema,
 
     // Authoritative source of truth for generation.
     spec: ActivitySpecSchema,

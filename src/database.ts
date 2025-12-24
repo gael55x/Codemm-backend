@@ -34,6 +34,7 @@ export function initializeDatabase() {
       id TEXT PRIMARY KEY,
       user_id INTEGER,
       state TEXT NOT NULL,
+      learning_mode TEXT NOT NULL DEFAULT 'practice',
       spec_json TEXT NOT NULL,
       plan_json TEXT,
       problems_json TEXT,
@@ -66,6 +67,9 @@ export function initializeDatabase() {
   }
   if (!sessionColSet.has("generation_outcomes_json")) {
     db.exec(`ALTER TABLE sessions ADD COLUMN generation_outcomes_json TEXT`);
+  }
+  if (!sessionColSet.has("learning_mode")) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN learning_mode TEXT NOT NULL DEFAULT 'practice'`);
   }
 
   db.exec(`
@@ -171,6 +175,7 @@ export interface DBSession {
   id: string;
   user_id: number | null;
   state: string;
+  learning_mode?: string | null;
   spec_json: string;
   plan_json?: string | null;
   problems_json?: string | null;
@@ -333,12 +338,18 @@ export const submissionDb = {
 
 // Codemm v1.0 Session operations (contract-driven)
 export const sessionDb = {
-  create: (id: string, state: string, specJson: string, userId?: number | null) => {
+  create: (
+    id: string,
+    state: string,
+    learningMode: string,
+    specJson: string,
+    userId?: number | null
+  ) => {
     const stmt = db.prepare(
-      `INSERT INTO sessions (id, user_id, state, spec_json, confidence_json, intent_trace_json, commitments_json, generation_outcomes_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+      `INSERT INTO sessions (id, user_id, state, learning_mode, spec_json, confidence_json, intent_trace_json, commitments_json, generation_outcomes_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     );
-    stmt.run(id, userId ?? null, state, specJson, "{}", "[]", "[]", "[]");
+    stmt.run(id, userId ?? null, state, learningMode, specJson, "{}", "[]", "[]", "[]");
   },
 
   findById: (id: string): DBSession | undefined => {

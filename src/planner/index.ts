@@ -1,5 +1,6 @@
 import type { ActivitySpec, Difficulty } from "../contracts/activitySpec";
 import { ProblemPlanSchema, type ProblemPlan, type ProblemSlot } from "./types";
+import type { PedagogyPolicy } from "./pedagogy";
 
 /**
  * Deterministic expansion of difficulty_plan into individual slots.
@@ -64,7 +65,7 @@ function distributTopics(spec: ActivitySpec, slotCount: number): string[][] {
  *
  * This is the contract between SpecBuilder and Generation.
  */
-export function deriveProblemPlan(spec: ActivitySpec): ProblemPlan {
+export function deriveProblemPlan(spec: ActivitySpec, _pedagogyPolicy?: PedagogyPolicy): ProblemPlan {
   // Validate input (should already be valid if coming from READY session)
   if (spec.problem_count < 1 || spec.problem_count > 7) {
     throw new Error("problem_count must be between 1 and 7.");
