@@ -1,12 +1,18 @@
 import type { LearningMode } from "../contracts/learningMode";
 
 /**
- * Extension point for future "Guided Mode" pedagogy without changing
- * generation safety/verification behavior.
+ * Planner-level pedagogy policy.
  *
- * Phase 1: policy is a no-op placeholder (mode-aware, but does not alter slots yet).
+ * This affects how an activity is structured pedagogically (ordering/scaffolding),
+ * without changing generation safety contracts or Docker verification.
+ *
+ * Phase 2A: policy is consumed only to annotate plan slots with optional pedagogy metadata.
  */
 export type PedagogyPolicy =
-  | { mode: Extract<LearningMode, "guided"> }
-  | { mode: Extract<LearningMode, "practice"> };
-
+  | { mode: Extract<LearningMode, "practice"> }
+  | {
+      mode: Extract<LearningMode, "guided">;
+      scaffold_curve?: number[];
+      focus_concepts?: string[];
+      hints_enabled?: boolean;
+    };
