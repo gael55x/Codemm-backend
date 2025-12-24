@@ -30,6 +30,20 @@ function testSuiteReferencesClass(testSuite: string, className: string): boolean
 }
 
 /**
+ * Optional pedagogy metadata.
+ *
+ * Phase 1: accepted by schema, not enforced by generation/execution.
+ * This is an extension point for Guided Mode UX later.
+ */
+const PedagogySchema = z
+  .object({
+    scaffold_level: z.number().int().min(0).max(100).optional(),
+    learning_goal: z.string().trim().min(1).max(240).optional(),
+    hints_enabled: z.boolean().optional(),
+  })
+  .strict();
+
+/**
  * Codemm v1.0 Generation output contract for problems.
  *
  * NOTE: reference_solution is required at generation time, validated in Docker,
@@ -50,6 +64,9 @@ const CommonProblemFieldsSchema = z
     // Planned metadata (derived from ProblemPlan, not user chat).
     difficulty: z.enum(["easy", "medium", "hard"]),
     topic_tag: z.string().trim().min(1).max(40),
+
+    // Optional pedagogy metadata (no safety impact).
+    pedagogy: PedagogySchema.optional(),
   })
   .strict();
 

@@ -9,6 +9,7 @@ import { LANGUAGE_PROFILES, listAgentSelectableLanguages } from "../languages/pr
 import { type DialogueRevision, USER_EDITABLE_SPEC_KEYS, type UserEditableSpecKey } from "./dialogue";
 import type { CommitmentStore } from "./commitments";
 import { AmbiguityRisk, classifyAmbiguityRisk } from "./ambiguity";
+import type { LearningMode } from "../contracts/learningMode";
 
 export type IntentResolutionResult =
   | { kind: "patch"; patch: JsonPatchOp[]; merged: SpecDraft; output: IntentResolutionOutput }
@@ -395,6 +396,7 @@ function defaultClarificationForBlockingField(field: UserEditableSpecKey, curren
 export async function resolveIntentWithLLM(args: {
   userMessage: string;
   currentSpec: SpecDraft;
+  learningMode?: LearningMode | undefined;
   commitments?: CommitmentStore | undefined;
   currentQuestionKey?: string | null | undefined;
 }): Promise<IntentResolutionResult> {

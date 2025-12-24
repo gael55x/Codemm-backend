@@ -24,6 +24,15 @@ Codemm follows a strict boundary:
 
 More detail: `documentation/architecture.md`
 
+## Codemm learning modes
+
+Codemm exposes a user-facing **Learning Mode** (pedagogy), without changing safety or verification:
+
+- `practice`: current behavior — generate problems from an `ActivitySpec`
+- `guided`: scaffolded, learner-adaptive sequences (coming soon; structural support only in Phase 1)
+
+Both modes use the same contracts, invariants, retries, and Docker validation.
+
 ## Quickstart (local dev)
 
 Prereqs: Node 18+, npm, Docker Desktop.

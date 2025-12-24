@@ -16,6 +16,30 @@ This backend is built around a deterministic “SpecBuilder” agent loop plus a
 - **LLM client** (OpenAI-compatible): `src/infra/llm/codex.ts`
 - **Persistence** (SQLite): `src/database.ts` → `data/codem.db`
 
+## Codemm learning modes (Phase 1)
+
+Codemm supports a first-class, user-facing **Learning Mode** that changes *how activities are constructed pedagogically* (now or later), without changing safety or verification.
+
+- **Practice Mode** (`learning_mode=practice`): current behavior — generate problems from an `ActivitySpec`.
+- **Guided Mode** (`learning_mode=guided`): scaffolded, learner-adaptive sequences (structural support only in Phase 1; behavior comes later).
+
+Safety/verification is identical across modes:
+- Same contracts (`ActivitySpec`, `GeneratedProblemDraft`/`GeneratedProblem`)
+- Same invariants, retries, and deterministic gates
+- Same Docker validation and reference-artifact discard
+
+The mode is stored on the session row (`sessions.learning_mode`) and is read-only context for the agent/planner in Phase 1.
+
+```mermaid
+flowchart LR
+  U[User] --> S[Sessions API]
+  S --> IR[Intent Resolver\n(mode-aware context)]
+  IR --> C[Compiler Boundary\n(invariants + JSON Patch)]
+  C --> P[Planner\nderiveProblemPlan(spec, pedagogyPolicy?)]
+  P --> G[Generator\n(per-slot + retries)]
+  G --> DJ[Docker Judge\n(compile + tests)]
+```
+
 ## SpecBuilder loop (chat → ActivitySpec)
 
 The `/sessions/:id/messages` endpoint runs one loop step:
@@ -70,4 +94,3 @@ Adapters and constraints live under `src/languages/*` (e.g., JUnit 5 rules for J
 ## Diagrams
 
 See `AGENTIC_PLATFORM.md` for end-to-end Mermaid diagrams of the platform and the agent logic.
-
