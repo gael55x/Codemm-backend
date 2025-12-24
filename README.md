@@ -1,58 +1,83 @@
-# Codem-backend
-Codem backend - agentic AI
+# Codem Backend (Codemm)
 
-## Env safety (recommended)
-
-If you ever plan to commit environment values, use dotenvx precommit to avoid leaking secrets:
-- https://dotenvx.com/precommit
+Express + SQLite backend powering Codem’s agentic activity generation and sandboxed execution/judging via Docker.
 
 ## Docs
 
-- Agentic platform diagrams: `AGENTIC_PLATFORM.md`
+- Start here: `documentation/README.md`
+- Architecture diagrams (Mermaid): `documentation/AGENTIC_PLATFORM.md`
 
-## SpecBuilder (Deterministic Agent Loop)
+## What’s in this backend
+
+- **SpecBuilder sessions API** (`/sessions`): deterministic agent loop that turns chat into an `ActivitySpec`.
+- **Generation pipeline** (`/sessions/:id/generate`): per-slot LLM drafts → schema validation → Docker verification → persist (reference artifacts discarded).
+- **Execution/Judge APIs**: `/run` (code-only) and `/submit` (graded w/ tests) run inside Docker judge images.
+- **Observability**: generation progress SSE + optional sanitized trace SSE (no prompts/raw generations/reference artifacts).
+
+## Core design (agentic, but deterministic)
 
 Codemm follows a strict boundary:
 
-- **LLM proposes**: intent inference + per-slot generation.
-- **Compiler decides**: Zod contracts, invariants, JSON Patch application, and deterministic gates.
-- **No direct state mutation by LLM**: all persisted state is produced by audited, deterministic code.
+- **LLM proposes**: intent inference (`inferredPatch`) + per-slot problem drafts.
+- **Compiler decides**: Zod contracts, invariants, JSON Patch application, commitment locking, readiness gates, and next-question selection.
+- **No direct state mutation by LLM**: persisted state is produced by audited deterministic code paths.
 
-### Session API (high level)
+More detail: `documentation/architecture.md`
 
+## Quickstart (local dev)
+
+Prereqs: Node 18+, npm, Docker Desktop.
+
+1) Configure env:
+- `cp .env.example .env`
+- Set `CODEX_API_KEY` and `JWT_SECRET` in `.env`
+
+2) Run (recommended one-command runner; builds judge images if needed):
+- `./run-codem-backend.sh`
+
+Manual alternative:
+- `npm install`
+- `npm run dev`
+
+Build + run:
+- `npm run build && npm start`
+
+Useful runner toggles:
+- `BACKEND_MODE=prod ./run-codem-backend.sh`
+- `REBUILD_JUDGE=1 ./run-codem-backend.sh`
+
+## API surface (high level)
+
+Base URL: `http://localhost:${PORT:-4000}`
+
+Sessions (SpecBuilder):
 - `POST /sessions` → create a session (`DRAFT`)
-- `POST /sessions/:id/messages` → agent loop step
-  - Response includes:
-    - `nextQuestion`: assistant text
-    - `questionKey`: stable deterministic key (e.g. `goal:content`, `confirm:topic_tags`, `invalid:difficulty_plan`)
-    - `done`: `true` when spec is ready for generation
-- `POST /sessions/:id/generate` (auth) → generate activity with Docker-validated reference artifacts (discarded)
-- `GET /sessions/:id` → debug snapshot (includes `commitments` and `generationOutcomes`)
+- `POST /sessions/:id/messages` → run one agent loop step (returns `nextQuestion`, `questionKey`, `done`)
+- `GET /sessions/:id` → debug snapshot (includes `commitments` + `generationOutcomes`)
+- `POST /sessions/:id/generate` (auth) → generate + persist an activity
+- `GET /sessions/:id/generate/stream` → SSE progress stream
+- `GET /sessions/:id/trace` → SSE trace stream (requires `CODEMM_TRACE=1`)
 
-### Runtime + grading APIs
+Execution / judge:
+- `POST /run` → Docker sandbox execution (code-only or multi-file; no tests)
+- `POST /submit` → graded execution (requires `testSuite`)
+- `GET /activities/:id` (auth) → fetch persisted activity (problems include `language`)
 
-- `POST /run` → sandboxed execution (code-only or multi-file) for supported languages.
-- `POST /submit` → graded execution (requires `testSuite`) using the language’s judge adapter.
-- `GET /activities/:id` (auth) → returns the persisted activity with `problems[]` (each problem includes `language`).
+Auth / profile:
+- `POST /auth/register`, `POST /auth/login`, `GET /auth/me`
+- `GET /profile` (auth)
 
-### C++ test runner note
-
-C++ grading uses a custom `test.cpp` runner inside Docker. The generator enforces a variadic macro harness:
-- `#define RUN_TEST(name, ...) ... __VA_ARGS__ ...`
-
-This avoids C preprocessor “macro passed N arguments” errors caused by commas inside test blocks.
+Full details + examples: `documentation/api.md`
 
 ## Debug tracing
 
-Tracing is opt-in and disabled by default.
-
 - Enable trace events: `CODEMM_TRACE=1`
 - Stream trace events (SSE): `GET /sessions/:id/trace`
-- Include C++ test suite snippets in trace payloads (for generator debugging): `CODEMM_TRACE_TEST_SUITES=1`
+- Include generator test suite snippets (debug only): `CODEMM_TRACE_TEST_SUITES=1`
 
-Note: the trace stream intentionally omits prompts, raw generations, and reference solutions.
+Note: trace/progress streams intentionally omit prompts, raw generations, and reference artifacts.
 
-### Persisted agent memory (auditable)
+## Env safety (recommended)
 
-- `commitments_json`: accepted field/value decisions, with explicit/implicit source + locking.
-- `generation_outcomes_json`: per-slot generation results (success/retries/fallback) used for feedback and traceability.
+If you ever plan to commit environment values, use dotenvx precommit:
+- https://dotenvx.com/precommit
