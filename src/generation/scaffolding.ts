@@ -2,7 +2,6 @@ import type { GeneratedProblemDraft } from "../contracts/problem";
 import type { ProblemSlot } from "../planner/types";
 import { getLanguageProfile } from "../languages/profiles";
 import { trace } from "../utils/trace";
-import { GenerationContractError } from "./errors";
 
 function normalizeScaffoldLevel(raw: unknown): number | null {
   if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
@@ -298,12 +297,7 @@ function scaffoldJavaFromReference(args: {
   learningGoal?: string | undefined;
 }): { code: string; replacedCount: number } {
   const marker = `${args.lineComment} BEGIN STUDENT TODO`;
-  if (args.reference.includes(marker)) {
-    throw new GenerationContractError("reference artifact must not include STUDENT TODO markers.", {
-      slotIndex: -1,
-      llmOutputHash: undefined,
-    });
-  }
+  if (args.reference.includes(marker)) return { code: args.reference, replacedCount: 0 };
 
   const methods = scanJavaMethodBodies(args.reference).filter((m) => m.name !== "main");
   if (methods.length === 0) return { code: args.reference, replacedCount: 0 };
@@ -320,6 +314,191 @@ function scaffoldJavaFromReference(args: {
     scaffoldLevel: args.scaffoldLevel,
     learningGoal: args.learningGoal,
   });
+}
+
+type PythonFunctionBlock = {
+  name: string;
+  startLine: number;
+  endLine: number;
+  bodyNonEmptyLines: number;
+};
+
+function scanPythonTopLevelFunctions(source: string): PythonFunctionBlock[] {
+  const lines = source.split("\n");
+  const blocks: PythonFunctionBlock[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const m = /^def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(line);
+    if (!m) continue;
+    const name = m[1] ?? "";
+    if (!name) continue;
+
+    let end = lines.length;
+    for (let j = i + 1; j < lines.length; j++) {
+      const l = lines[j] ?? "";
+      if (/^(def|class)\s+/.test(l)) {
+        end = j;
+        break;
+      }
+    }
+
+    let nonEmpty = 0;
+    for (let j = i + 1; j < end; j++) {
+      if ((lines[j] ?? "").trim()) nonEmpty++;
+    }
+
+    blocks.push({ name, startLine: i, endLine: end, bodyNonEmptyLines: nonEmpty });
+    i = end - 1;
+  }
+
+  return blocks;
+}
+
+function scaffoldPythonFromReference(args: {
+  reference: string;
+  scaffoldLevel: number;
+  lineComment: string;
+  learningGoal?: string | undefined;
+}): { code: string; replacedCount: number } {
+  const marker = `${args.lineComment} BEGIN STUDENT TODO`;
+  if (args.reference.includes(marker)) return { code: args.reference, replacedCount: 0 };
+
+  const lines = args.reference.split("\n");
+  const blocks = scanPythonTopLevelFunctions(args.reference);
+  if (blocks.length === 0) return { code: args.reference, replacedCount: 0 };
+
+  const missingFraction = Math.max(0, Math.min(1, 1 - args.scaffoldLevel));
+  const targetCount = Math.max(1, Math.min(blocks.length, Math.ceil(blocks.length * missingFraction)));
+  const byComplexity = [...blocks].sort((a, b) =>
+    b.bodyNonEmptyLines === a.bodyNonEmptyLines ? a.startLine - b.startLine : b.bodyNonEmptyLines - a.bodyNonEmptyLines
+  );
+
+  const chosenNames: string[] = [];
+  // Always include solve(...) if present.
+  const solve = blocks.find((b) => b.name === "solve");
+  if (solve) chosenNames.push("solve");
+  for (const b of byComplexity) {
+    if (chosenNames.length >= targetCount) break;
+    if (chosenNames.includes(b.name)) continue;
+    chosenNames.push(b.name);
+  }
+  const chosen = blocks.filter((b) => chosenNames.includes(b.name)).sort((a, b) => b.startLine - a.startLine);
+
+  for (const b of chosen) {
+    const header = lines[b.startLine] ?? "";
+    let bodyIndent = "    ";
+    for (let j = b.startLine + 1; j < b.endLine; j++) {
+      const l = lines[j] ?? "";
+      if (!l.trim()) continue;
+      const indent = l.match(/^\s*/)?.[0] ?? "";
+      if (indent) {
+        bodyIndent = indent;
+        break;
+      }
+    }
+
+    const todo = buildTodoLines({
+      lineComment: args.lineComment,
+      scaffoldLevel: args.scaffoldLevel,
+      learningGoal: args.learningGoal,
+    });
+    const replacement = [header, ...todo.map((l) => `${bodyIndent}${l}`), `${bodyIndent}raise NotImplementedError("TODO")`];
+    lines.splice(b.startLine, b.endLine - b.startLine, ...replacement);
+  }
+
+  return { code: lines.join("\n"), replacedCount: chosen.length };
+}
+
+function scaffoldCppFromReference(args: {
+  reference: string;
+  scaffoldLevel: number;
+  lineComment: string;
+  learningGoal?: string | undefined;
+}): { code: string; replacedCount: number } {
+  const marker = `${args.lineComment} BEGIN STUDENT TODO`;
+  if (args.reference.includes(marker)) return { code: args.reference, replacedCount: 0 };
+
+  // Best-effort: find the first "solve(...)" function definition and replace its body.
+  const re = /\bsolve\s*\(/g;
+  const match = re.exec(args.reference);
+  if (!match) return { code: args.reference, replacedCount: 0 };
+
+  const openParen = match.index + match[0].lastIndexOf("(");
+  let parenDepth = 0;
+  let closeParen = -1;
+  for (let i = openParen; i < args.reference.length; i++) {
+    const ch = args.reference[i]!;
+    if (ch === "(") parenDepth++;
+    if (ch === ")") {
+      parenDepth--;
+      if (parenDepth === 0) {
+        closeParen = i;
+        break;
+      }
+    }
+  }
+  if (closeParen < 0) return { code: args.reference, replacedCount: 0 };
+
+  let openBrace = -1;
+  for (let i = closeParen + 1; i < args.reference.length; i++) {
+    const ch = args.reference[i]!;
+    if (/\s/.test(ch)) continue;
+    if (ch !== "{") return { code: args.reference, replacedCount: 0 };
+    openBrace = i;
+    break;
+  }
+  if (openBrace < 0) return { code: args.reference, replacedCount: 0 };
+
+  // Match braces (no string/comment awareness, but reference solutions are expected to be simple).
+  let depth = 0;
+  let closeBrace = -1;
+  for (let i = openBrace; i < args.reference.length; i++) {
+    const ch = args.reference[i]!;
+    if (ch === "{") depth++;
+    if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        closeBrace = i;
+        break;
+      }
+    }
+  }
+  if (closeBrace < 0) return { code: args.reference, replacedCount: 0 };
+
+  const lineStart = args.reference.lastIndexOf("\n", openBrace);
+  const indentMatch = args.reference.slice(lineStart + 1, openBrace).match(/^\s*/);
+  const indent = indentMatch ? indentMatch[0] : "";
+  const bodyIndent = `${indent}  `;
+  const todo = buildTodoLines({
+    lineComment: args.lineComment,
+    scaffoldLevel: args.scaffoldLevel,
+    learningGoal: args.learningGoal,
+  });
+
+  const body =
+    `\n` +
+    todo.map((l) => `${bodyIndent}${l}`).join("\n") +
+    `\n${bodyIndent}throw std::runtime_error(\"TODO\");\n` +
+    indent;
+
+  const out = args.reference.slice(0, openBrace + 1) + body + args.reference.slice(closeBrace);
+  return { code: out, replacedCount: 1 };
+}
+
+function scaffoldSqlFromReference(args: {
+  reference: string;
+  scaffoldLevel: number;
+  lineComment: string;
+  learningGoal?: string | undefined;
+}): { code: string } {
+  const todo = buildTodoLines({
+    lineComment: args.lineComment,
+    scaffoldLevel: args.scaffoldLevel,
+    learningGoal: args.learningGoal,
+  });
+  const query = args.scaffoldLevel >= 0.75 ? "SELECT 1;" : "SELECT 1;";
+  return { code: `${todo.join("\n")}\n${query}\n` };
 }
 
 export function applyGuidedScaffolding(draft: GeneratedProblemDraft, slot: ProblemSlot): GeneratedProblemDraft {
@@ -379,8 +558,57 @@ export function applyGuidedScaffolding(draft: GeneratedProblemDraft, slot: Probl
     };
   }
 
-  // Phase 1: Guided scaffolding is currently implemented for Java only.
-  // Other languages will still carry pedagogy metadata, but retain their existing starter code.
+  if ("reference_solution" in draft) {
+    if (draft.language === "python") {
+      const scaffolded = scaffoldPythonFromReference({
+        reference: draft.reference_solution,
+        scaffoldLevel: level,
+        lineComment,
+        learningGoal,
+      });
+      trace("generation.guided.scaffolded", {
+        slotIndex: slot.index,
+        language: draft.language,
+        kind: "starter_code",
+        scaffoldLevel: level,
+        replacedCount: scaffolded.replacedCount,
+      });
+      return { ...draft, starter_code: scaffolded.code };
+    }
+
+    if (draft.language === "cpp") {
+      const scaffolded = scaffoldCppFromReference({
+        reference: draft.reference_solution,
+        scaffoldLevel: level,
+        lineComment,
+        learningGoal,
+      });
+      trace("generation.guided.scaffolded", {
+        slotIndex: slot.index,
+        language: draft.language,
+        kind: "starter_code",
+        scaffoldLevel: level,
+        replacedCount: scaffolded.replacedCount,
+      });
+      return { ...draft, starter_code: scaffolded.code };
+    }
+
+    if (draft.language === "sql") {
+      const scaffolded = scaffoldSqlFromReference({
+        reference: draft.reference_solution,
+        scaffoldLevel: level,
+        lineComment,
+        learningGoal,
+      });
+      trace("generation.guided.scaffolded", {
+        slotIndex: slot.index,
+        language: draft.language,
+        kind: "starter_code",
+        scaffoldLevel: level,
+      });
+      return { ...draft, starter_code: scaffolded.code };
+    }
+  }
+
   return draft;
 }
-
