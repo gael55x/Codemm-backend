@@ -15,6 +15,7 @@ export const CPP_LANGUAGE_PROFILE: LanguageProfile = {
   defaultTestCaseCount: CODEMM_DEFAULT_TEST_CASE_COUNT,
   support: { execution: true, judge: true, generation: true },
   promptHints: ["C++20", "exactly 8 tests named test_case_1..test_case_8", "no filesystem/networking"],
+  scaffolding: { lineComment: "//" },
   executionAdapter: cppExecutionAdapter,
   judgeAdapter: cppJudgeAdapter,
   generator: {

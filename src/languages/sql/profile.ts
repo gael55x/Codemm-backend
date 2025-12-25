@@ -15,6 +15,7 @@ export const SQL_LANGUAGE_PROFILE: LanguageProfile = {
   defaultTestCaseCount: CODEMM_DEFAULT_TEST_CASE_COUNT,
   support: { execution: false, judge: true, generation: true },
   promptHints: ["SQLite", "read-only queries", "exactly 8 tests named test_case_1..test_case_8"],
+  scaffolding: { lineComment: "--" },
   judgeAdapter: sqlJudgeAdapter,
   generator: {
     systemPrompt: SQL_V1_GENERATOR_SYSTEM_PROMPT,
