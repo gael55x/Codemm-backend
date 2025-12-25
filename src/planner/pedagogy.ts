@@ -26,10 +26,10 @@ function clamp01(n: number): number {
 
 function baseScaffoldForIndex(index: number): number {
   if (index <= 0) return 80;
-  if (index === 1) return 50;
+  if (index === 1) return 60;
   if (index === 2) return 30;
-  // After the first 3, taper quickly toward a small scaffold.
-  return Math.max(10, 30 - (index - 2) * 10);
+  // After the first 3, keep a minimal scaffold.
+  return 10;
 }
 
 function computeAverageMastery(tags: string[], mastery: Record<string, number> | null | undefined): number {
@@ -54,12 +54,7 @@ export function buildGuidedPedagogyPolicy(args: {
     .map((x) => x.t);
 
   const avg = computeAverageMastery(args.spec.topic_tags, mastery);
-  // If mastery is low, increase scaffold; if high, decrease scaffold. Deterministic and bounded.
-  const factor = Math.max(0.7, Math.min(1.3, 1 + (0.5 - avg) * 0.8));
-
-  const scaffold_curve = Array.from({ length: args.spec.problem_count }, (_v, i) =>
-    Math.max(0, Math.min(100, Math.round(baseScaffoldForIndex(i) * factor)))
-  );
+  const scaffold_curve = Array.from({ length: args.spec.problem_count }, (_v, i) => baseScaffoldForIndex(i));
 
   return {
     mode: "guided",
