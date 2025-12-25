@@ -99,6 +99,15 @@ function safeExtractPatchFromText(userMessage: string): Partial<ActivitySpec> {
   return patch;
 }
 
+function stripUndefinedValues(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === undefined) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 function buildNextQuestion(spec: SpecDraft): { key: string; prompt: string } | null {
   const gaps = analyzeSpecGaps(spec);
   if (gaps.complete) return null;
@@ -139,7 +148,7 @@ Your job:
 Hard rules:
 - Output ONLY valid JSON (no markdown, no prose outside JSON).
 - Do NOT include chain-of-thought or hidden reasoning.
-- Do NOT ask multiple questions; ask at most ONE question inside acknowledgement/inferred intent.
+- Do NOT ask ANY questions. The server will deterministically choose the next question.
 - Only propose these patch fields (omit anything else):
   - language: one of ${ActivityLanguageSchema.options.join(", ")}
   - problem_count: 1..7
@@ -194,7 +203,11 @@ Return JSON with this exact shape:
     // fall through to deterministic fallback
   }
 
-  const proposedPatch: Partial<ActivitySpec> = parsed?.proposedPatch ?? safeExtractPatchFromText(input.latestUserMessage);
+  const rawPatch = (parsed?.proposedPatch ?? safeExtractPatchFromText(input.latestUserMessage)) as unknown as Record<
+    string,
+    unknown
+  >;
+  const proposedPatch = stripUndefinedValues(rawPatch) as Partial<ActivitySpec>;
 
   const confirm = computeConfirmRequired({
     userMessage: input.latestUserMessage,
@@ -216,8 +229,6 @@ Return JSON with this exact shape:
       : "Got it.");
   const inferred = parsed?.inferred_intent?.trim() || "I’ll translate that into an activity spec.";
 
-  // Return assistantMessage as the conversational acknowledgement + summary.
-  // The caller can append nextQuestion.prompt after deterministic patch acceptance.
   const assistantMessage = [acknowledgement, inferred].filter(Boolean).join("\n\n");
 
   return {
