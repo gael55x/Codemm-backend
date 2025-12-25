@@ -216,7 +216,9 @@ Return JSON with this exact shape:
       : "Got it.");
   const inferred = parsed?.inferred_intent?.trim() || "I’ll translate that into an activity spec.";
 
-  const assistantMessage = [acknowledgement, inferred, nextQuestion?.prompt].filter(Boolean).join("\n\n");
+  // Return assistantMessage as the conversational acknowledgement + summary.
+  // The caller can append nextQuestion.prompt after deterministic patch acceptance.
+  const assistantMessage = [acknowledgement, inferred].filter(Boolean).join("\n\n");
 
   return {
     assistantMessage,
@@ -225,4 +227,3 @@ Return JSON with this exact shape:
     ...(nextQuestion ? { nextQuestion } : {}),
   };
 }
-
