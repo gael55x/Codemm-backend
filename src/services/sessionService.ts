@@ -449,6 +449,12 @@ export async function processSessionMessage(
 	      fields: fields as UserEditableSpecKey[],
 	      patch: proposed,
 	    };
+
+      trace("session.confirmation.pending", {
+        sessionId,
+        fields,
+        candidateKeys: Object.keys(proposed ?? {}),
+      });
 	
 	    persistMessage("assistant", assistantText);
 	    persistCollectorState(sessionId, { currentQuestionKey: nextKey, buffer: serializePendingConfirmation(pendingConfirm) });
@@ -481,13 +487,13 @@ export async function processSessionMessage(
     return { final, fixedAfter };
   };
 
-  if (userOps.length > 0) {
-    const candidate = applyWithDraftValidation(userOps);
-    const res = ActivitySpecDraftSchema.safeParse(candidate.final);
-    if (res.success) {
-      nextSpec = candidate.final;
-      appliedUserOps = userOps;
-    } else {
+	  if (userOps.length > 0) {
+	    const candidate = applyWithDraftValidation(userOps);
+	    const res = ActivitySpecDraftSchema.safeParse(candidate.final);
+	    if (res.success) {
+	      nextSpec = candidate.final;
+	      appliedUserOps = userOps;
+	    } else {
       // Deterministic repair: drop invalid fields once.
       const invalidKeys = Array.from(
         new Set(res.error.issues.map((i) => (i.path?.[0] != null ? String(i.path[0]) : "")))
@@ -503,11 +509,16 @@ export async function processSessionMessage(
       } else {
         nextSpec = specWithFixed as SpecDraft;
         appliedUserOps = [];
-      }
-    }
-  }
+	      }
+	    }
+	  }
 
-  sessionDb.updateSpecJson(sessionId, JSON.stringify(nextSpec));
+    trace("session.spec.user_patch_applied", {
+      sessionId,
+      appliedOps: appliedUserOps.map((op) => op.path),
+    });
+	
+	  sessionDb.updateSpecJson(sessionId, JSON.stringify(nextSpec));
 
   // Treat accepted fields as high confidence (deterministic; hard-field confirmation is separate).
   for (const op of appliedUserOps) {
