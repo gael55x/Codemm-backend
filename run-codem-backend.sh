@@ -67,6 +67,9 @@ start_backend() {
   echo
   echo "Starting Codem backend on port ${port} (mode=${BACKEND_MODE})..."
   [[ -n "${CODEMM_TRACE:-}" ]] && echo "CODEMM_TRACE=${CODEMM_TRACE}"
+  [[ -n "${CODEMM_TRACE_FULL:-}" ]] && echo "CODEMM_TRACE_FULL=${CODEMM_TRACE_FULL}"
+  [[ -n "${CODEMM_LOG_CONVERSATION:-}" ]] && echo "CODEMM_LOG_CONVERSATION=${CODEMM_LOG_CONVERSATION}"
+  [[ -n "${CODEMM_HTTP_LOG:-}" ]] && echo "CODEMM_HTTP_LOG=${CODEMM_HTTP_LOG}"
   [[ -n "${CODEMM_WORKSPACE_GEN:-}" ]] && echo "CODEMM_WORKSPACE_GEN=${CODEMM_WORKSPACE_GEN}"
   echo "Press Ctrl+C to stop."
   echo
