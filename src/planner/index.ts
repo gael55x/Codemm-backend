@@ -38,8 +38,9 @@ function expandDifficultySlots(spec: ActivitySpec): Difficulty[] {
  * For simplicity: assign exactly 1 primary topic per slot, cycling through the list.
  * If we have extra tags, we can assign a second topic to some slots.
  */
-function distributTopics(spec: ActivitySpec, slotCount: number): string[][] {
-  const tags = spec.topic_tags;
+function distributTopics(spec: ActivitySpec, slotCount: number, focusConcepts?: string[] | null): string[][] {
+  const focus = Array.isArray(focusConcepts) ? focusConcepts.filter((t) => spec.topic_tags.includes(t)) : [];
+  const tags = focus.length > 0 ? focus : spec.topic_tags;
   if (tags.length === 0) {
     throw new Error("topic_tags cannot be empty when deriving ProblemPlan.");
   }
@@ -78,12 +79,12 @@ export function deriveProblemPlan(spec: ActivitySpec, _pedagogyPolicy?: Pedagogy
     );
   }
 
-  const topicAssignments = distributTopics(spec, spec.problem_count);
-
   const policy = _pedagogyPolicy;
+  const focus = policy?.mode === "guided" && Array.isArray(policy.focus_concepts) ? policy.focus_concepts : [];
+  const topicAssignments = distributTopics(spec, spec.problem_count, focus);
+
   const slots: ProblemSlot[] = difficulties.map((difficulty, index) => {
     const topics = topicAssignments[index] ?? [];
-    const focus = policy?.mode === "guided" && Array.isArray(policy.focus_concepts) ? policy.focus_concepts : [];
     const focusIndex = focus.length > 0 ? index % focus.length : 0;
     const curveValue = policy?.mode === "guided" ? policy.scaffold_curve?.[index] : undefined;
     const pedagogy =
