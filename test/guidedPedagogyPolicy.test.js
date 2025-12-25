@@ -48,7 +48,7 @@ test("guided pedagogy policy: scaffold depends on mastery", () => {
   assert.equal(high.mode, "guided");
   assert.ok(Array.isArray(low.scaffold_curve));
   assert.ok(Array.isArray(high.scaffold_curve));
-  assert.notEqual(low.scaffold_curve[0], high.scaffold_curve[0]);
+  assert.deepEqual(low.scaffold_curve, [80, 60, 30, 10]);
+  assert.deepEqual(high.scaffold_curve, [80, 60, 30, 10]);
   assert.notEqual(low.hints_enabled, high.hints_enabled);
 });
-
