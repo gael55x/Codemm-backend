@@ -11,11 +11,10 @@ import { subscribeTrace } from "../utils/traceBus";
 import { getGenerationProgressBuffer, subscribeGenerationProgress } from "../generation/progressBus";
 import type { GenerationProgressEvent } from "../contracts/generationProgress";
 import { LearningModeSchema } from "../contracts/learningMode";
-import { computeReadiness } from "../agent/readiness";
-import { generateNextPromptPayload } from "../agent/promptGenerator";
 import crypto from "crypto";
 import { sessionMessageDb } from "../database";
 import { logConversationMessage } from "../utils/devLogs";
+import { analyzeSpecGaps, defaultNextQuestionFromGaps } from "../agent/specAnalysis";
 
 export const sessionsRouter = Router();
 
@@ -48,29 +47,22 @@ sessionsRouter.post("/", (req, res) => {
     const learningMode = parsed.success ? parsed.data : undefined;
     const { sessionId, state, learning_mode } = createSession(null, learningMode);
     const session = getSession(sessionId);
-    const readiness = computeReadiness(session.spec as any, session.confidence as any, null);
-    const prompt = generateNextPromptPayload({
-      spec: session.spec as any,
-      readiness,
-      confidence: session.confidence as any,
-      commitments: null,
-      lastUserMessage: "",
-    });
+    const gaps = analyzeSpecGaps(session.spec as any);
+    const promptText = defaultNextQuestionFromGaps(gaps);
+    const nextKey = gaps.complete ? "ready" : String(gaps.missing[0] ?? "topic_tags");
 
     // Persist the initial assistant prompt so conversation logs are complete.
-    sessionMessageDb.create(crypto.randomUUID(), sessionId, "assistant", prompt.assistant_message);
-    logConversationMessage({ sessionId, role: "assistant", content: prompt.assistant_message });
+    sessionMessageDb.create(crypto.randomUUID(), sessionId, "assistant", promptText);
+    logConversationMessage({ sessionId, role: "assistant", content: promptText });
 
     res.status(201).json({
       sessionId,
       state,
       learning_mode,
-      nextQuestion: prompt.assistant_message,
-      questionKey: session.collector.currentQuestionKey,
+      nextQuestion: promptText,
+      questionKey: nextKey,
       done: false,
-      ...(prompt.assistant_summary ? { assistant_summary: prompt.assistant_summary } : {}),
-      ...(prompt.assumptions ? { assumptions: prompt.assumptions } : {}),
-      next_action: prompt.next_action,
+      next_action: "ask",
     });
   } catch (err: any) {
     console.error("Error in POST /sessions:", err);
@@ -185,32 +177,32 @@ sessionsRouter.post("/:id/messages", async (req, res) => {
 
     const result = await processSessionMessage(id, message.trim());
 
-	    if (!result.accepted) {
-	      return res.status(200).json({
-	        accepted: false,
-	        state: result.state,
-	        nextQuestion: result.nextQuestion,
-	        questionKey: result.questionKey,
-	        done: false,
-	        error: result.error,
-	        spec: result.spec,
-	        assistant_summary: (result as any).assistant_summary,
-	        assumptions: (result as any).assumptions,
-	        next_action: (result as any).next_action,
-	      });
-	    }
+    if (!result.accepted) {
+      return res.status(200).json({
+        accepted: false,
+        state: result.state,
+        nextQuestion: result.nextQuestion,
+        questionKey: result.questionKey,
+        done: false,
+        error: result.error,
+        spec: result.spec,
+        assistant_summary: (result as any).assistant_summary,
+        assumptions: (result as any).assumptions,
+        next_action: (result as any).next_action,
+      });
+    }
 
-	    return res.status(200).json({
-	      accepted: true,
-	      state: result.state,
-	      nextQuestion: result.nextQuestion,
-	      questionKey: result.questionKey,
-	      spec: result.spec,
-	      done: result.done,
-	      assistant_summary: (result as any).assistant_summary,
-	      assumptions: (result as any).assumptions,
-	      next_action: (result as any).next_action,
-	    });
+    return res.status(200).json({
+      accepted: true,
+      state: result.state,
+      nextQuestion: result.nextQuestion,
+      questionKey: result.questionKey,
+      spec: result.spec,
+      done: result.done,
+      assistant_summary: (result as any).assistant_summary,
+      assumptions: (result as any).assumptions,
+      next_action: (result as any).next_action,
+    });
   } catch (err: any) {
     const status = typeof err?.status === "number" ? err.status : 500;
     if (status >= 500) {

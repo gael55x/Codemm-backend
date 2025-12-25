@@ -8,17 +8,13 @@ import { deriveProblemPlan } from "../planner";
 import { generateProblemsFromPlan } from "../generation";
 import type { GeneratedProblem } from "../contracts/problem";
 import type { SpecDraft } from "../compiler/specDraft";
-import { ensureFixedFields } from "../compiler/specDraft";
+import { ActivitySpecDraftSchema, ensureFixedFields, isSpecCompleteForGeneration } from "../compiler/specDraft";
 import { trace, traceText } from "../utils/trace";
 import { withTraceContext } from "../utils/traceContext";
-import { resolveIntentWithLLM } from "../agent/intentResolver";
-import type { IntentResolutionOutput } from "../agent/intentResolver";
-import { computeReadiness, type ConfidenceMap } from "../agent/readiness";
-import { generateNextPromptPayload } from "../agent/promptGenerator";
-import { getDynamicQuestionKey } from "../agent/questionKey";
+import type { ConfidenceMap } from "../agent/readiness";
 import { proposeGenerationFallback } from "../agent/generationFallback";
 import { GenerationSlotFailureError } from "../generation/errors";
-import { type DialogueUpdate, USER_EDITABLE_SPEC_KEYS, type UserEditableSpecKey } from "../agent/dialogue";
+import { USER_EDITABLE_SPEC_KEYS, type UserEditableSpecKey } from "../agent/dialogue";
 import { publishGenerationProgress } from "../generation/progressBus";
 import type { GenerationProgressEvent } from "../contracts/generationProgress";
 import type { GenerationOutcome } from "../contracts/generationOutcome";
@@ -31,12 +27,11 @@ import {
   type CommitmentStore,
 } from "../agent/commitments";
 import { DEFAULT_LEARNING_MODE, LearningModeSchema, type LearningMode } from "../contracts/learningMode";
-import { computeConfirmRequired } from "../agent/fieldCommitmentPolicy";
-import { classifyDialogueAct } from "../agent/dialogueAct";
-import { defaultPatchForGoal } from "../agent/deferDefaults";
 import { getLearnerProfile } from "./learnerProfileService";
 import { buildGuidedPedagogyPolicy } from "../planner/pedagogy";
 import { logConversationMessage } from "../utils/devLogs";
+import { runDialogueTurn } from "./dialogueService";
+import { analyzeSpecGaps, defaultNextQuestionFromGaps } from "../agent/specAnalysis";
 
 export type SessionRecord = {
   id: string;
@@ -142,13 +137,11 @@ function inferCommitmentSource(args: {
   field: UserEditableSpecKey;
   userMessage: string;
   currentQuestionKey: string | null;
-  output?: IntentResolutionOutput | null;
 }): "explicit" | "implicit" {
   const msg = args.userMessage.trim().toLowerCase();
   const qk = args.currentQuestionKey;
   const goal = qk?.startsWith("goal:") ? qk.slice("goal:".length) : null;
 
-  if (args.output?.revision?.replaces?.includes(args.field)) return "explicit";
   if (qk === args.field) return "explicit";
   if (qk?.startsWith("invalid:") && qk.slice("invalid:".length) === args.field) return "explicit";
   if (goal === "content" && args.field === "topic_tags") return "explicit";
@@ -190,53 +183,6 @@ function appendIntentTrace(existing: unknown[], entry: unknown, maxEntries: numb
   return next.length > maxEntries ? next.slice(next.length - maxEntries) : next;
 }
 
-function jsonStable(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function computeDialogueUpdate(args: {
-  previous: SpecDraft;
-  next: SpecDraft;
-  output?: IntentResolutionOutput | null;
-}): DialogueUpdate | null {
-  const changed: DialogueUpdate["changed"] = {};
-  const added: UserEditableSpecKey[] = [];
-  const removed: UserEditableSpecKey[] = [];
-
-  for (const key of USER_EDITABLE_SPEC_KEYS) {
-    const before = (args.previous as any)[key] as unknown;
-    const after = (args.next as any)[key] as unknown;
-
-    const beforeExists = before !== undefined;
-    const afterExists = after !== undefined;
-
-    if (beforeExists && !afterExists) {
-      removed.push(key);
-      continue;
-    }
-    if (!beforeExists && afterExists) {
-      added.push(key);
-      continue;
-    }
-    if (beforeExists && afterExists && jsonStable(before) !== jsonStable(after)) {
-      changed[key] = { from: before, to: after };
-    }
-  }
-
-  const outputInvalidates = args.output?.revision?.invalidates ?? [];
-  const invalidated = removed.filter((k) => (outputInvalidates as string[]).includes(k));
-
-  const hasAny =
-    Object.keys(changed).length > 0 || added.length > 0 || removed.length > 0 || invalidated.length > 0;
-  if (!hasAny) return null;
-
-  return { changed, added, removed, invalidated };
-}
-
 function requireSession(id: string) {
   const session = sessionDb.findById(id);
   if (!session) {
@@ -260,41 +206,19 @@ function parseSpecJson(specJson: string): Record<string, unknown> {
   }
 }
 
-function parseCollectorBuffer(bufferJson: string | null | undefined): string[] {
-  if (!bufferJson) return [];
-  try {
-    const parsed = JSON.parse(bufferJson);
-    if (Array.isArray(parsed)) {
-      return parsed.filter((item): item is string => typeof item === "string");
-    }
-  } catch {
-    // ignore parse errors and reset to empty buffer
-  }
-  return [];
-}
-
 function persistCollectorState(sessionId: string, state: SessionCollectorState): SessionCollectorState {
   sessionCollectorDb.upsert(sessionId, state.currentQuestionKey, state.buffer);
   return state;
 }
 
-function getCollectorState(
-  sessionId: string,
-  expectedQuestionKey: string | null
-): SessionCollectorState {
+function getCollectorState(sessionId: string): SessionCollectorState {
   const existing = sessionCollectorDb.findBySessionId(sessionId);
   if (!existing) {
-    return persistCollectorState(sessionId, { currentQuestionKey: expectedQuestionKey, buffer: [] });
+    return persistCollectorState(sessionId, { currentQuestionKey: null, buffer: [] });
   }
 
-  const buffer = parseCollectorBuffer(existing.buffer_json);
   const storedKey = (existing.current_question_key as string | null) ?? null;
-
-  if (storedKey !== expectedQuestionKey) {
-    return persistCollectorState(sessionId, { currentQuestionKey: expectedQuestionKey, buffer: [] });
-  }
-
-  return { currentQuestionKey: storedKey, buffer };
+  return { currentQuestionKey: storedKey, buffer: [] };
 }
 
 function transitionOrThrow(from: SessionState, to: SessionState) {
@@ -319,8 +243,7 @@ export function createSession(
 
   // Contract allows null or {} — DB column is NOT NULL, so we store {}.
   sessionDb.create(id, state, learning_mode, JSON.stringify(initialSpec), userId ?? null);
-  const initialQuestionKey = getDynamicQuestionKey(initialSpec as SpecDraft, {}, null);
-  sessionCollectorDb.upsert(id, initialQuestionKey, []);
+  sessionCollectorDb.upsert(id, null, []);
 
   return { sessionId: id, state, learning_mode };
 }
@@ -331,7 +254,7 @@ export function getSession(id: string): SessionRecord {
   const spec = parseSpecJson(s.spec_json);
   const confidence = parseJsonObject(s.confidence_json) as Record<string, number>;
   const commitments = parseCommitmentsJson(s.commitments_json);
-  const collector = getCollectorState(id, getDynamicQuestionKey(spec as SpecDraft, confidence as any, commitments));
+  const collector = getCollectorState(id);
   const intentTrace = parseJsonArray(s.intent_trace_json).slice(-50);
   const generationOutcomes = parseGenerationOutcomes(s.generation_outcomes_json);
   const learning_mode = parseLearningMode((s as any).learning_mode);
@@ -383,230 +306,89 @@ export async function processSessionMessage(
   return withTraceContext({ sessionId }, async () => {
     const s = requireSession(sessionId);
     const state = s.state as SessionState;
-    const learning_mode = parseLearningMode((s as any).learning_mode);
     trace("session.message.start", { sessionId, state });
     traceText("session.message.user", message, { extra: { sessionId } });
 
-  if (state !== "DRAFT" && state !== "CLARIFYING") {
-    const err = new Error(`Cannot post messages when session state is ${state}.`);
-    (err as any).status = 409;
-    throw err;
-  }
+    if (state !== "DRAFT" && state !== "CLARIFYING") {
+      const err = new Error(`Cannot post messages when session state is ${state}.`);
+      (err as any).status = 409;
+      throw err;
+    }
 
-  const currentSpec = parseSpecJson(s.spec_json);
-  const existingConfidence = parseJsonObject(s.confidence_json) as ConfidenceMap;
-  let commitmentsStore: CommitmentStore = parseCommitmentsJson(s.commitments_json);
+    const currentSpec = parseSpecJson(s.spec_json);
+    const existingConfidence = parseJsonObject(s.confidence_json) as ConfidenceMap;
+    let commitmentsStore: CommitmentStore = parseCommitmentsJson(s.commitments_json);
 
-  const persistMessage = (role: "user" | "assistant", content: string) => {
-    sessionMessageDb.create(crypto.randomUUID(), sessionId, role, content);
-    logConversationMessage({ sessionId, role, content });
+    const persistMessage = (role: "user" | "assistant", content: string) => {
+      sessionMessageDb.create(crypto.randomUUID(), sessionId, role, content);
+      logConversationMessage({ sessionId, role, content });
+    };
+
+    // Always persist user message.
+    persistMessage("user", message);
+
+    const fixed = ensureFixedFields(currentSpec as SpecDraft);
+    const specWithFixed = fixed.length > 0 ? applyJsonPatch(currentSpec as any, fixed) : currentSpec;
+    trace("session.spec.fixed", { sessionId, fixedOps: fixed.map((op) => op.path) });
+
+    const existingTrace = parseJsonArray(s.intent_trace_json);
+    let effectiveConfidence: ConfidenceMap = { ...existingConfidence };
+
+    // Ensure the fixed fields are persisted even if the user message doesn't change anything.
+    sessionDb.updateSpecJson(sessionId, JSON.stringify(specWithFixed));
+
+    const historyRows = sessionMessageDb.findBySessionId(sessionId).slice(-30);
+    const history = historyRows.map((m) => ({ role: m.role as any, content: m.content as string }));
+
+    const dialogue = await runDialogueTurn({
+      sessionState: state,
+      currentSpec: specWithFixed as SpecDraft,
+      conversationHistory: history,
+      latestUserMessage: message,
+    });
+
+    const traceEntry = {
+      ts: new Date().toISOString(),
+      type: "dialogue_turn",
+      proposedPatch: dialogue.proposedPatch,
+      needsConfirmation: dialogue.needsConfirmation ?? null,
+    };
+    const nextTrace = appendIntentTrace(existingTrace, traceEntry);
+    sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
+
+    const collector = getCollectorState(sessionId);
+    const currentQuestionKey = collector.currentQuestionKey;
+
+    const proposed = dialogue.proposedPatch ?? {};
+
+  const buildOpsFromPartial = (base: SpecDraft, partial: Record<string, unknown>): JsonPatchOp[] => {
+    const ops: JsonPatchOp[] = [];
+    for (const [k, v] of Object.entries(partial)) {
+      if (v === undefined) continue;
+      const path = `/${k}`;
+      const exists = Object.prototype.hasOwnProperty.call(base, k) && (base as any)[k] !== undefined;
+      ops.push({ op: exists ? "replace" : "add", path, value: v });
+    }
+    return ops;
   };
 
-  // Always persist user message.
-  persistMessage("user", message);
+  const buildNextQuestion = (spec: SpecDraft): { key: string; prompt: string } | null => {
+    const gaps = analyzeSpecGaps(spec);
+    if (gaps.complete) return null;
+    const prompt = defaultNextQuestionFromGaps(gaps);
+    const priority: (keyof ActivitySpec)[] = ["language", "problem_count", "difficulty_plan", "topic_tags", "problem_style"];
+    const next = priority.find((k) => gaps.missing.includes(k)) ?? (gaps.missing[0] as keyof ActivitySpec | undefined);
+    return { key: next ? String(next) : "unknown", prompt };
+  };
 
-  const fixed = ensureFixedFields(currentSpec as SpecDraft);
-  const specWithFixed = fixed.length > 0 ? applyJsonPatch(currentSpec as any, fixed) : currentSpec;
-  trace("session.spec.fixed", { sessionId, fixedOps: fixed.map((op) => op.path) });
+  if (Array.isArray(dialogue.needsConfirmation) && dialogue.needsConfirmation.length > 0) {
+    const fields = dialogue.needsConfirmation.slice().sort();
+    const nextKey = dialogue.nextQuestion?.key ?? `confirm:${fields.join(",")}`;
+    const prompt = dialogue.nextQuestion?.prompt ?? "Confirm the change you want to make.";
+    const assistantText = [dialogue.assistantMessage, prompt].filter(Boolean).join("\n\n");
 
-  const expectedQuestionKey = getDynamicQuestionKey(specWithFixed as SpecDraft, existingConfidence, commitmentsStore);
-  const collector = getCollectorState(sessionId, expectedQuestionKey);
-  const updatedBuffer = [...collector.buffer, message];
-  persistCollectorState(sessionId, { currentQuestionKey: expectedQuestionKey, buffer: updatedBuffer });
-
-  const combined = updatedBuffer.join(" ").trim();
-  traceText("session.message.combined", combined, { extra: { sessionId, bufferLen: updatedBuffer.length } });
-  const existingTrace = parseJsonArray(s.intent_trace_json);
-  let effectiveConfidence: ConfidenceMap = { ...existingConfidence };
-  const dialogueAct = classifyDialogueAct(combined);
-
-  // Deterministic "defer" handling: if user says "anything/whatever", apply safe defaults instead of looping.
-  if (dialogueAct.act === "DEFER" && expectedQuestionKey?.startsWith("goal:")) {
-    const goal = expectedQuestionKey.slice("goal:".length);
-    const decision = defaultPatchForGoal(goal, specWithFixed as SpecDraft);
-    if (decision) {
-      const merged = applyJsonPatch(specWithFixed as any, decision.patch) as SpecDraft;
-      const fixedAfter = ensureFixedFields(merged);
-      const finalSpec = fixedAfter.length > 0 ? (applyJsonPatch(merged as any, fixedAfter) as SpecDraft) : merged;
-
-      for (const op of decision.patch) {
-        const key = op.path.startsWith("/") ? op.path.slice(1) : op.path;
-        if (key) effectiveConfidence[key] = 1;
-      }
-      sessionDb.updateConfidenceJson(sessionId, JSON.stringify(effectiveConfidence));
-      sessionDb.updateSpecJson(sessionId, JSON.stringify(finalSpec));
-
-      const nextTrace = appendIntentTrace(existingTrace, {
-        ts: new Date().toISOString(),
-        type: "default_applied",
-        goal,
-        assumptions: decision.assumptions,
-      });
-      sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
-      existingTrace.splice(0, existingTrace.length, ...nextTrace);
-
-      const readiness = computeReadiness(finalSpec as SpecDraft, effectiveConfidence, commitmentsStore);
-      const prompt = generateNextPromptPayload({
-        spec: finalSpec as SpecDraft,
-        readiness,
-        confidence: effectiveConfidence,
-        commitments: commitmentsStore,
-        lastUserMessage: combined,
-      });
-
-      persistMessage("assistant", prompt.assistant_message);
-      const nextKey = getDynamicQuestionKey(finalSpec as SpecDraft, effectiveConfidence, commitmentsStore);
-      persistCollectorState(sessionId, { currentQuestionKey: nextKey, buffer: [] });
-
-      const done = readiness.ready;
-      const target: SessionState = done ? "READY" : "CLARIFYING";
-      transitionOrThrow(state, target);
-      sessionDb.updateState(sessionId, target);
-
-      return {
-        accepted: true,
-        state: target,
-        nextQuestion: prompt.assistant_message,
-        questionKey: nextKey,
-        done,
-        spec: finalSpec,
-        patch: [...fixed, ...decision.patch, ...fixedAfter],
-        ...(prompt.assistant_summary ? { assistant_summary: prompt.assistant_summary } : {}),
-        assumptions: decision.assumptions,
-        next_action: prompt.next_action,
-      };
-    }
-  }
-
-  // Deterministic confirmation: if we're only asking to confirm low-confidence fields and the user replies "yes",
-  // lock those fields and skip the LLM roundtrip.
-  if (expectedQuestionKey?.startsWith("confirm:") && isPureConfirmationMessage(combined)) {
-    const fields = expectedQuestionKey
-      .slice("confirm:".length)
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean) as UserEditableSpecKey[];
-
-    for (const field of fields) {
-      const value = (specWithFixed as any)[field];
-      if (value === undefined) continue;
-      effectiveConfidence[String(field)] = 1;
-      commitmentsStore = upsertCommitment(commitmentsStore, {
-        field,
-        value,
-        confidence: 1,
-        source: "explicit",
-      });
-    }
-
-    sessionDb.updateConfidenceJson(sessionId, JSON.stringify(effectiveConfidence));
-    sessionDb.updateCommitmentsJson(sessionId, serializeCommitments(commitmentsStore));
-
-    const nextTrace = appendIntentTrace(existingTrace, {
-      ts: new Date().toISOString(),
-      type: "commitment_confirmation",
-      fields,
-    });
-    sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
-    existingTrace.splice(0, existingTrace.length, ...nextTrace);
-
-    const readiness = computeReadiness(specWithFixed as SpecDraft, effectiveConfidence, commitmentsStore);
-    const prompt = generateNextPromptPayload({
-      spec: specWithFixed as SpecDraft,
-      readiness,
-      confidence: effectiveConfidence,
-      commitments: commitmentsStore,
-      lastUserMessage: combined,
-    });
-
-    persistMessage("assistant", prompt.assistant_message);
-    const nextKey = getDynamicQuestionKey(specWithFixed as SpecDraft, effectiveConfidence, commitmentsStore);
-    persistCollectorState(sessionId, {
-      currentQuestionKey: nextKey,
-      buffer: [],
-    });
-
-    const done = readiness.ready;
-    const target: SessionState = done ? "READY" : "CLARIFYING";
-    if (!done) {
-      transitionOrThrow(state, target);
-      sessionDb.updateState(sessionId, target);
-      return {
-        accepted: true,
-        state: target,
-        nextQuestion: prompt.assistant_message,
-        questionKey: nextKey,
-        done: false,
-        spec: specWithFixed,
-        patch: fixed,
-        ...(prompt.assistant_summary ? { assistant_summary: prompt.assistant_summary } : {}),
-        ...(prompt.assumptions ? { assumptions: prompt.assumptions } : {}),
-        next_action: prompt.next_action,
-      };
-    }
-
-    if (state === "DRAFT") {
-      transitionOrThrow("DRAFT", "CLARIFYING");
-      sessionDb.updateState(sessionId, "CLARIFYING");
-      transitionOrThrow("CLARIFYING", "READY");
-      sessionDb.updateState(sessionId, "READY");
-    } else {
-      transitionOrThrow(state, "READY");
-      sessionDb.updateState(sessionId, "READY");
-    }
-
-    return {
-      accepted: true,
-      state: "READY",
-      nextQuestion: prompt.assistant_message,
-      questionKey: nextKey,
-      done: true,
-      spec: specWithFixed,
-      patch: fixed,
-      ...(prompt.assistant_summary ? { assistant_summary: prompt.assistant_summary } : {}),
-      ...(prompt.assumptions ? { assumptions: prompt.assumptions } : {}),
-      next_action: prompt.next_action,
-    };
-  }
-
-  const resolved = await resolveIntentWithLLM({
-    userMessage: combined,
-    currentSpec: specWithFixed as SpecDraft,
-    currentQuestionKey: expectedQuestionKey,
-    commitments: commitmentsStore,
-    learningMode: learning_mode,
-  }).catch((e) => ({ kind: "error" as const, error: e?.message ?? String(e) }));
-
-  if ("output" in resolved && resolved.output) {
-    const output = resolved.output as IntentResolutionOutput;
-    const nextConfidence = mergeConfidence(existingConfidence, output.confidence ?? {});
-    effectiveConfidence = nextConfidence;
-    const nextTrace = appendIntentTrace(existingTrace, {
-      ts: new Date().toISOString(),
-      userMessage: combined,
-      output,
-      result: resolved.kind,
-    });
-    sessionDb.updateConfidenceJson(sessionId, JSON.stringify(nextConfidence));
-    sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
-    existingTrace.splice(0, existingTrace.length, ...nextTrace);
-    trace("session.intent.persisted", {
-      sessionId,
-      confidenceKeys: Object.keys(nextConfidence),
-      traceLen: nextTrace.length,
-    });
-  }
-
-  if (resolved.kind === "clarify") {
-    const assistantText = resolved.question;
     persistMessage("assistant", assistantText);
-
-    sessionDb.updateSpecJson(sessionId, JSON.stringify(specWithFixed));
-    const nextKey = getDynamicQuestionKey(specWithFixed as SpecDraft, effectiveConfidence, commitmentsStore);
-    persistCollectorState(sessionId, {
-      currentQuestionKey: nextKey,
-      buffer: [],
-    });
+    persistCollectorState(sessionId, { currentQuestionKey: nextKey, buffer: [] });
 
     const target: SessionState = "CLARIFYING";
     transitionOrThrow(state, target);
@@ -620,202 +402,104 @@ export async function processSessionMessage(
       done: false,
       spec: specWithFixed,
       patch: fixed,
+      next_action: "confirm",
     };
   }
 
-  if (resolved.kind === "patch") {
-    const confirm = computeConfirmRequired({
-      userMessage: combined,
-      currentSpec: specWithFixed as SpecDraft,
-      inferredPatch: (resolved.output as any)?.inferredPatch ?? {},
-    });
-    if (confirm.required) {
-      const nextTrace = appendIntentTrace(existingTrace, {
-        ts: new Date().toISOString(),
-        type: "confirm_required",
-        ...confirm.event,
-      });
-      sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
-      existingTrace.splice(0, existingTrace.length, ...nextTrace);
+  // Apply the proposed patch deterministically (and never persist invalid fields).
+  let appliedUserOps: JsonPatchOp[] = [];
+  let nextSpec: SpecDraft = specWithFixed as SpecDraft;
+  const userOps = buildOpsFromPartial(specWithFixed as SpecDraft, proposed as any);
 
-      const field = confirm.fields[0]!;
-      const assistantText =
-        field === "language"
-          ? `I might be inferring a language switch. Which language should we use? Reply with one: java, python, cpp, sql.`
-          : field === "problem_count"
-          ? "How many problems should this activity have? (1–7)"
-          : "What difficulty spread do you want? Example: easy:2, medium:2, hard:1";
+  const applyWithDraftValidation = (ops: JsonPatchOp[]) => {
+    const merged = ops.length > 0 ? (applyJsonPatch(specWithFixed as any, ops) as SpecDraft) : (specWithFixed as SpecDraft);
+    const fixedAfter = ensureFixedFields(merged);
+    const final = fixedAfter.length > 0 ? (applyJsonPatch(merged as any, fixedAfter) as SpecDraft) : merged;
+    return { final, fixedAfter };
+  };
 
-      persistMessage("assistant", assistantText);
-      sessionDb.updateSpecJson(sessionId, JSON.stringify(specWithFixed));
-      const nextKey = `confirm:${confirm.fields.slice().sort().join(",")}`;
-      persistCollectorState(sessionId, { currentQuestionKey: nextKey, buffer: [] });
-
-      const target: SessionState = "CLARIFYING";
-      transitionOrThrow(state, target);
-      sessionDb.updateState(sessionId, target);
-
-      return {
-        accepted: true,
-        state: target,
-        nextQuestion: assistantText,
-        questionKey: nextKey,
-        done: false,
-        spec: specWithFixed,
-        patch: fixed,
-      };
-    }
-
-    const nextSpec = resolved.merged as Record<string, unknown>;
-    sessionDb.updateSpecJson(sessionId, JSON.stringify(nextSpec));
-
-    // Update commitments for any accepted user-editable fields and clear commitments for invalidated removals.
-    for (const op of resolved.patch) {
-      if (!op.path.startsWith("/")) continue;
-      const key = op.path.slice(1) as UserEditableSpecKey;
-      if (!(USER_EDITABLE_SPEC_KEYS as readonly string[]).includes(key)) continue;
-
-      if (op.op === "remove") {
-        commitmentsStore = removeCommitment(commitmentsStore, key as any);
-        continue;
-      }
-
-      const value = (resolved.merged as any)[key];
-      const source = inferCommitmentSource({
-        field: key,
-        userMessage: combined,
-        currentQuestionKey: expectedQuestionKey,
-        output: resolved.output ?? null,
-      });
-      const confidenceForKey = effectiveConfidence[String(key)] ?? resolved.output?.confidence?.[String(key)] ?? 0;
-      commitmentsStore = upsertCommitment(commitmentsStore, {
-        field: key,
-        value,
-        confidence: confidenceForKey,
-        source,
-      });
-    }
-    sessionDb.updateCommitmentsJson(sessionId, serializeCommitments(commitmentsStore));
-
-    const readiness = computeReadiness(resolved.merged, effectiveConfidence, commitmentsStore);
-    trace("session.readiness", {
-      sessionId,
-      schemaComplete: readiness.gaps.complete,
-      ready: readiness.ready,
-      minConfidence: readiness.minConfidence,
-      lowConfidenceFields: readiness.lowConfidenceFields,
-      missing: readiness.gaps.missing,
-    });
-
-    const done = readiness.ready;
-    const dialogueUpdate = computeDialogueUpdate({
-      previous: specWithFixed as SpecDraft,
-      next: resolved.merged,
-      output: resolved.output ?? null,
-    });
-
-    if (dialogueUpdate) {
-      const nextTrace = appendIntentTrace(existingTrace, {
-        ts: new Date().toISOString(),
-        type: "dialogue_revision",
-        update: dialogueUpdate,
-        patch: resolved.patch,
-      });
-      sessionDb.updateIntentTraceJson(sessionId, JSON.stringify(nextTrace));
-      existingTrace.splice(0, existingTrace.length, ...nextTrace);
-    }
-
-    const prompt = generateNextPromptPayload({
-      spec: resolved.merged,
-      readiness,
-      confidence: effectiveConfidence,
-      commitments: commitmentsStore,
-      lastUserMessage: combined,
-      dialogueUpdate,
-    });
-
-    persistMessage("assistant", prompt.assistant_message);
-    const nextKey = getDynamicQuestionKey(resolved.merged, effectiveConfidence, commitmentsStore);
-    persistCollectorState(sessionId, {
-      currentQuestionKey: nextKey,
-      buffer: [],
-    });
-
-    if (!done) {
-      const target: SessionState = "CLARIFYING";
-      transitionOrThrow(state, target);
-      sessionDb.updateState(sessionId, target);
-      return {
-        accepted: true,
-        state: target,
-        nextQuestion: prompt.assistant_message,
-        questionKey: nextKey,
-        done: false,
-        spec: nextSpec,
-        patch: [...fixed, ...resolved.patch],
-        ...(prompt.assistant_summary ? { assistant_summary: prompt.assistant_summary } : {}),
-        ...(prompt.assumptions ? { assumptions: prompt.assumptions } : {}),
-        next_action: prompt.next_action,
-      };
-    }
-
-    if (state === "DRAFT") {
-      transitionOrThrow("DRAFT", "CLARIFYING");
-      sessionDb.updateState(sessionId, "CLARIFYING");
-      transitionOrThrow("CLARIFYING", "READY");
-      sessionDb.updateState(sessionId, "READY");
+  if (userOps.length > 0) {
+    const candidate = applyWithDraftValidation(userOps);
+    const res = ActivitySpecDraftSchema.safeParse(candidate.final);
+    if (res.success) {
+      nextSpec = candidate.final;
+      appliedUserOps = userOps;
     } else {
-      transitionOrThrow(state, "READY");
-      sessionDb.updateState(sessionId, "READY");
+      // Deterministic repair: drop invalid fields once.
+      const invalidKeys = Array.from(
+        new Set(res.error.issues.map((i) => (i.path?.[0] != null ? String(i.path[0]) : "")))
+      ).filter(Boolean);
+      const filtered: Record<string, unknown> = { ...(proposed as any) };
+      for (const k of invalidKeys) delete filtered[k];
+      const ops2 = buildOpsFromPartial(specWithFixed as SpecDraft, filtered);
+      const candidate2 = applyWithDraftValidation(ops2);
+      const res2 = ActivitySpecDraftSchema.safeParse(candidate2.final);
+      if (res2.success) {
+        nextSpec = candidate2.final;
+        appliedUserOps = ops2;
+      } else {
+        nextSpec = specWithFixed as SpecDraft;
+        appliedUserOps = [];
+      }
     }
-
-    return {
-      accepted: true,
-      state: "READY",
-      nextQuestion: prompt.assistant_message,
-      questionKey: nextKey,
-      done: true,
-      spec: nextSpec,
-      patch: [...fixed, ...resolved.patch],
-      ...(prompt.assistant_summary ? { assistant_summary: prompt.assistant_summary } : {}),
-      ...(prompt.assumptions ? { assumptions: prompt.assumptions } : {}),
-      next_action: prompt.next_action,
-    };
   }
 
-  // LLM returned noop/error: fall back to deterministic "what's missing next" prompt.
-  trace("session.intent.fallback", { sessionId, kind: resolved.kind });
-  const readiness = computeReadiness(specWithFixed as SpecDraft, effectiveConfidence, commitmentsStore);
-  const prompt = generateNextPromptPayload({
-    spec: specWithFixed as SpecDraft,
-    readiness,
-    confidence: effectiveConfidence,
-    commitments: commitmentsStore,
-    lastUserMessage: combined,
-  });
+  sessionDb.updateSpecJson(sessionId, JSON.stringify(nextSpec));
 
-  persistMessage("assistant", prompt.assistant_message);
-  const nextKey = getDynamicQuestionKey(specWithFixed as SpecDraft, effectiveConfidence, commitmentsStore);
-  persistCollectorState(sessionId, {
-    currentQuestionKey: nextKey,
-    buffer: [],
-  });
+  // Treat accepted fields as high confidence (deterministic; hard-field confirmation is separate).
+  for (const op of appliedUserOps) {
+    const key = op.path.startsWith("/") ? op.path.slice(1) : op.path;
+    if (!key) continue;
+    effectiveConfidence[key] = 1;
+  }
+  sessionDb.updateConfidenceJson(sessionId, JSON.stringify(effectiveConfidence));
 
-  if (!readiness.ready) {
+  // Update commitments for any accepted user-editable fields and clear commitments for invalidated removals.
+  for (const op of appliedUserOps) {
+    if (!op.path.startsWith("/")) continue;
+    const key = op.path.slice(1) as UserEditableSpecKey;
+    if (!(USER_EDITABLE_SPEC_KEYS as readonly string[]).includes(key)) continue;
+
+    if (op.op === "remove") {
+      commitmentsStore = removeCommitment(commitmentsStore, key as any);
+      continue;
+    }
+
+    const value = (nextSpec as any)[key];
+    const source = inferCommitmentSource({ field: key, userMessage: message, currentQuestionKey });
+    commitmentsStore = upsertCommitment(commitmentsStore, {
+      field: key,
+      value,
+      confidence: 1,
+      source,
+    });
+  }
+  sessionDb.updateCommitmentsJson(sessionId, serializeCommitments(commitmentsStore));
+
+  const done = isSpecCompleteForGeneration(nextSpec as SpecDraft);
+  const nq = done ? null : buildNextQuestion(nextSpec as SpecDraft);
+  const nextKey = done ? "ready" : nq?.key ?? null;
+
+  const assistantText = [dialogue.assistantMessage, done ? "Spec looks complete. You can generate the activity." : nq?.prompt]
+    .filter(Boolean)
+    .join("\n\n");
+
+  persistMessage("assistant", assistantText);
+  persistCollectorState(sessionId, { currentQuestionKey: nextKey, buffer: [] });
+
+  if (!done) {
     const target: SessionState = "CLARIFYING";
     transitionOrThrow(state, target);
     sessionDb.updateState(sessionId, target);
     return {
       accepted: true,
       state: target,
-      nextQuestion: prompt.assistant_message,
+      nextQuestion: assistantText,
       questionKey: nextKey,
       done: false,
-      spec: specWithFixed,
-      patch: fixed,
-      ...(prompt.assistant_summary ? { assistant_summary: prompt.assistant_summary } : {}),
-      ...(prompt.assumptions ? { assumptions: prompt.assumptions } : {}),
-      next_action: prompt.next_action,
+      spec: nextSpec,
+      patch: [...fixed, ...appliedUserOps],
+      next_action: "ask",
     };
   }
 
@@ -829,18 +513,16 @@ export async function processSessionMessage(
     sessionDb.updateState(sessionId, "READY");
   }
 
-    return {
-      accepted: true,
-      state: "READY",
-      nextQuestion: prompt.assistant_message,
-      questionKey: nextKey,
-      done: true,
-      spec: specWithFixed,
-      patch: fixed,
-      ...(prompt.assistant_summary ? { assistant_summary: prompt.assistant_summary } : {}),
-      ...(prompt.assumptions ? { assumptions: prompt.assumptions } : {}),
-      next_action: prompt.next_action,
-    };
+  return {
+    accepted: true,
+    state: "READY",
+    nextQuestion: assistantText,
+    questionKey: nextKey,
+    done: true,
+    spec: nextSpec,
+    patch: [...fixed, ...appliedUserOps],
+    next_action: "ready",
+  };
   });
 }
 
