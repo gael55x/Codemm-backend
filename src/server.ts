@@ -31,6 +31,18 @@ const port = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
+// Dev-only request logging (never includes code/prompt payloads).
+if (process.env.CODEMM_HTTP_LOG === "1") {
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on("finish", () => {
+      const ms = Date.now() - start;
+      console.log(`[CODEMM_HTTP] ${req.method} ${req.originalUrl} ${res.statusCode} ${ms}ms`);
+    });
+    next();
+  });
+}
+
 // Codemm v1.0 sessions API (guided SpecBuilder chatbot)
 app.use("/sessions", sessionsRouter);
 
