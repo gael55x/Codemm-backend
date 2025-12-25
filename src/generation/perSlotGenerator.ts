@@ -14,6 +14,7 @@ import { trace, traceText } from "../utils/trace";
 import { GenerationContractError } from "./errors";
 import { getTopLevelPublicTypeNames } from "../utils/javaSource";
 import type { SlotPromptContext } from "../languages/types";
+import { coerceSqlTestSuiteToJsonString } from "../languages/sql/rules";
 
 const CODEX_MODEL = process.env.CODEX_MODEL ?? "gpt-4.1";
 const MAX_TOKENS = 5000;
@@ -632,10 +633,10 @@ export async function generateSingleProblem(
       return { draft: result.data, meta: { llmOutputHash } };
     }
 
-    if (slot.language === "sql") {
-      if (raw.workspace || raw.reference_workspace) {
-        throw new Error("SQL generation does not support workspace problems.");
-      }
+	    if (slot.language === "sql") {
+	      if (raw.workspace || raw.reference_workspace) {
+	        throw new Error("SQL generation does not support workspace problems.");
+	      }
 
       const baseId =
         typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : crypto.randomUUID();
@@ -654,11 +655,10 @@ export async function generateSingleProblem(
         typeof raw.starter_code === "string" && raw.starter_code.trim() ? raw.starter_code.trim() : "";
       if (!starterCode.trim()) starterCode = "SELECT 1;";
 
-      const testSuite =
-        typeof raw.test_suite === "string" && raw.test_suite.trim() ? raw.test_suite.trim() : "";
-      if (!testSuite.trim()) {
-        throw new Error(`Invalid test_suite for slot ${slot.index}: missing.`);
-      }
+	      const testSuite = coerceSqlTestSuiteToJsonString((raw as any).test_suite, 8);
+	      if (!testSuite.trim()) {
+	        throw new Error(`Invalid test_suite for slot ${slot.index}: missing.`);
+	      }
 
       const referenceSolution =
         typeof raw.reference_solution === "string" && raw.reference_solution.trim()

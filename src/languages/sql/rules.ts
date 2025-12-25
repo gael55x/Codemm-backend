@@ -54,6 +54,70 @@ export type SqlTestSuite = {
   }>;
 };
 
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is UnknownRecord {
+  return Boolean(v) && typeof v === "object" && !Array.isArray(v);
+}
+
+function normalizeSqlCaseObject(input: unknown): UnknownRecord | null {
+  if (!isRecord(input)) return null;
+  const seed_sql = typeof input.seed_sql === "string" ? input.seed_sql : input.seed_sql != null ? String(input.seed_sql) : "";
+  const expected = isRecord(input.expected) ? input.expected : null;
+  const order = (input as any).order_matters ?? (input as any)["order_matters?"];
+
+  const out: UnknownRecord = { seed_sql };
+  if (expected) out.expected = expected;
+  if (order != null) out.order_matters = Boolean(order);
+  return out;
+}
+
+/**
+ * Coerces common LLM outputs into the canonical SQL test suite JSON string shape:
+ * `{ schema_sql: string, cases: [{name, seed_sql, expected, order_matters?}, ...] }`.
+ *
+ * This does NOT relax validation: callers should still validate the resulting string
+ * with `isValidSqlTestSuite(...)`.
+ */
+export function coerceSqlTestSuiteToJsonString(raw: unknown, testCount: number): string {
+  if (typeof raw === "string") return raw.trim();
+  if (!isRecord(raw)) return "";
+
+  const schema_sql = typeof raw.schema_sql === "string" ? raw.schema_sql : "";
+
+  // Shape A: { schema_sql, cases: [...] }
+  if (schema_sql && Array.isArray(raw.cases)) {
+    const cases = raw.cases
+      .map((c) => (isRecord(c) ? c : null))
+      .filter(Boolean)
+      .map((c) => {
+        const normalized = normalizeSqlCaseObject(c);
+        const name = typeof c!.name === "string" ? c!.name : "";
+        return { name, ...(normalized ?? {}) };
+      });
+    return JSON.stringify({ schema_sql, cases });
+  }
+
+  // Shape B: { schema_sql, test_case_1: {...}, ..., test_case_8: {...} }
+  if (schema_sql) {
+    const cases: UnknownRecord[] = [];
+    for (let i = 1; i <= testCount; i++) {
+      const key = `test_case_${i}`;
+      const normalized = normalizeSqlCaseObject((raw as any)[key]);
+      if (!normalized) continue;
+      cases.push({ name: key, ...normalized });
+    }
+    return JSON.stringify({ schema_sql, cases });
+  }
+
+  // Fallback: stringify as-is so schema validation can fail deterministically with a useful message.
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return "";
+  }
+}
+
 export function isValidSqlTestSuite(raw: string, testCount: number): boolean {
   let parsed: any;
   try {
@@ -86,4 +150,3 @@ export function isValidSqlTestSuite(raw: string, testCount: number): boolean {
 
   return true;
 }
-
