@@ -9,14 +9,15 @@ This backend is built around a deterministic “SpecBuilder” agent loop plus a
 
 - **HTTP API (Express)**: `src/server.ts`, `src/routes/sessions.ts`
 - **Session orchestration (state machine + DB)**: `src/services/sessionService.ts`
-- **Agent loop (SpecBuilder)**: `src/agent/*`
+- **Dialogue layer (LLM, 1 call/turn)**: `src/services/dialogueService.ts`
+- **Agent utilities (deterministic)**: `src/agent/*`
 - **Deterministic compiler boundary**: `src/compiler/*`
 - **Generation pipeline**: `src/planner/*`, `src/generation/*`
 - **Language adapters (run/judge + rules)**: `src/languages/*`
 - **LLM client** (OpenAI-compatible): `src/infra/llm/codex.ts`
 - **Persistence** (SQLite): `src/database.ts` → `data/codem.db`
 
-## Codemm learning modes (Phase 1)
+## Codemm learning modes
 
 Codemm supports a first-class, user-facing **Learning Mode** that changes *how activities are constructed pedagogically* (now or later), without changing safety or verification.
 
@@ -33,8 +34,8 @@ The mode is stored on the session row (`sessions.learning_mode`) and is read-onl
 ```mermaid
 flowchart LR
   U[User] --> S[Sessions API]
-  S --> IR[Intent Resolver\n(mode-aware context)]
-  IR --> C[Compiler Boundary\n(invariants + JSON Patch)]
+  S --> DL[Dialogue Service\n(LLM proposes patch)]
+  DL --> C[Compiler Boundary\n(invariants + JSON Patch)]
   C --> P[Planner\nderiveProblemPlan(spec, pedagogyPolicy?)]
   P --> G[Generator\n(per-slot + retries)]
   G --> DJ[Docker Judge\n(compile + tests)]
@@ -44,28 +45,30 @@ flowchart LR
 
 The `/sessions/:id/messages` endpoint runs one loop step:
 
-1) **Collector buffer** groups user messages under a stable `questionKey` (prevents “half answers” from being treated as new intent).
-   - `src/agent/questionKey.ts`
-2) **Dialogue act classification (deterministic)** labels the user’s turn (e.g. `DEFER`, `CONFIRMATION`, `CORRECTION`) to reduce “delulu” loops.
-   - `src/agent/dialogueAct.ts`
-   - If the user defers (“any/whatever”), the backend can apply safe defaults deterministically (with a trace event), instead of repeatedly asking.
-3) **Intent inference** calls the LLM to produce a constrained JSON object:
-   - `src/agent/intentResolver.ts`
-   - Output is `inferredPatch` + `confidence` + optional `clarificationQuestion`
-4) **Robust parsing** tolerates minor JSON issues (JSON → JSON5 → jsonrepair):
-   - `src/utils/jsonParser.ts`
-5) **Field commitment policy (deterministic)** blocks implicit changes to “hard fields” (e.g. switching language, changing problem count/difficulty plan).
-   - If a hard field change lacks explicit user evidence, the system converts it into a `confirm_required` action instead of patching.
-   - `src/agent/fieldCommitmentPolicy.ts`
-6) **Deterministic patch application** converts `inferredPatch` → JSON Patch ops and applies them:
-   - `src/compiler/jsonPatch.ts`
-7) **Invariants** are enforced immediately (non-negotiable fields):
+1) **Invariants** are enforced immediately (non-negotiable fields):
    - `src/compiler/specDraft.ts` (`ensureFixedFields()`)
    - Examples: `version=1.0`, `test_case_count=8`, language-specific `constraints`
-8) **Commitments** persist “locked” decisions (explicit user signals stay stable across turns):
+2) **Deterministic pre-parsers** handle low-entropy fields without depending on LLM phrasing:
+   - Example: `difficulty_plan` shorthand parsing (`"easy"`, `"easy:2, medium:2"`, `"4 hard"`) in `src/agent/difficultyPlanParser.ts`
+3) **Dialogue layer (LLM, exactly 1 call per turn)** translates the user’s raw message into:
+   - a user-visible assistant message, and
+   - a partial `proposedPatch` (never mutates state directly)
+   - `src/services/dialogueService.ts`
+   - Invalid LLM output is handled deterministically (extract likely JSON substring → re-parse → safe extraction fallback).
+4) **Hard-field confirmation (deterministic)** prevents silent changes to “hard fields”:
+   - `src/agent/fieldCommitmentPolicy.ts`
+   - Confirmation is a reducer state, not an LLM loop:
+     - pending patch is stored in `session_collectors.buffer_json`
+     - `questionKey` becomes `confirm:<field1,field2,...>`
+     - a pure “yes/ok/confirm” reply deterministically applies the pending patch
+5) **Deterministic patch application + draft validation**
+   - Convert partial patch → top-level JSON Patch ops (`src/compiler/jsonPatch.ts`)
+   - Validate `ActivitySpecDraftSchema` (`src/compiler/specDraft.ts`)
+   - Deterministic repair: drop invalid fields once (never persists invalid data)
+6) **Commitments (persisted)** keep explicit decisions stable across turns:
    - `src/agent/commitments.ts`
-9) **Readiness gates + next question** decide whether the spec is complete enough to generate, and what to ask next:
-   - `src/agent/readiness.ts`, `src/agent/conversationGoals.ts`, `src/agent/promptGenerator.ts`
+7) **Next question selection (deterministic)** uses strict schema gaps:
+   - `analyzeSpecGaps()` + `defaultNextQuestionFromGaps()` in `src/agent/specAnalysis.ts`
 
 ## Deterministic boundaries (why it’s “agentic”, but safe)
 
@@ -88,7 +91,11 @@ When a session is `READY`, `POST /sessions/:id/generate` runs:
 4) **Problem contract validation** (strict Zod): `src/contracts/problem.ts`
 5) **Docker verification**: compile + run tests against a generated reference artifact
    - `src/generation/referenceSolutionValidator.ts`
-6) **Guided scaffolding (deterministic)**: when a slot contains pedagogy metadata, the student-facing code/workspace is scaffolded from the validated reference artifact (code removed; tests unchanged; regions wrapped with `BEGIN STUDENT TODO`/`END STUDENT TODO` markers).
+6) **Guided scaffolding (deterministic)**: when a slot contains pedagogy metadata, the student-facing code/workspace is scaffolded from the validated reference artifact:
+   - code is removed (structure preserved)
+   - tests are unchanged
+   - removed regions are wrapped with `BEGIN STUDENT TODO` / `END STUDENT TODO` markers (language-aware)
+   - reference artifacts never contain markers and are discarded before persistence
 7) **Safety rule**: reference artifacts are discarded before persistence (only learner-facing fields are stored).
 
 Progress events are published over SSE:
