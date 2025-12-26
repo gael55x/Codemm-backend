@@ -29,7 +29,7 @@ More detail: `documentation/architecture.md`
 Codemm exposes a user-facing **Learning Mode** (pedagogy), without changing safety or verification:
 
 - `practice`: current behavior — generate problems from an `ActivitySpec`
-- `guided`: scaffolded, learner-adaptive sequences (coming soon; structural support only in Phase 1)
+- `guided`: scaffolded, learner-adaptive sequences where the student-facing code is deterministically derived from a fully-correct reference artifact (tests unchanged; reference artifacts discarded before persistence)
 
 Both modes use the same contracts, invariants, retries, and Docker validation.
 

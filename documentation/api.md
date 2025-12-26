@@ -21,11 +21,16 @@ Auth header: `Authorization: Bearer <token>`
 - `POST /sessions`
   - Creates a new session in `DRAFT`
   - Optional body: `{ "learning_mode": "practice" | "guided" }` (default: `practice`)
+  - Returns an initial assistant greeting in `nextQuestion` (open-ended; not bound to a single field).
 - `POST /sessions/:id/messages`
   - Body: `{ "message": "..." }`
   - Returns:
     - `nextQuestion`: assistant prompt for the next turn
-    - `questionKey`: stable key for collector buffering (e.g. `goal:content`, `invalid:difficulty_plan`)
+    - `questionKey`: server-selected key for the current highest-priority follow-up
+      - `null` (no specific field yet)
+      - one of the spec keys: `language` | `problem_count` | `difficulty_plan` | `topic_tags` | `problem_style`
+      - `confirm:<...>` when hard-field confirmation is required
+      - `ready` when spec is complete for generation
     - `done`: `true` when spec is ready for generation
     - `spec`: current `SpecDraft`
     - Optional fields (additive; safe for older clients to ignore):
