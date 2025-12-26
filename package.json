@@ -7,7 +7,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "nodemon --watch src --exec ts-node src/server.ts",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "smoke:generate": "node scripts/smokeGenerate.js"
   },
   "repository": {
     "type": "git",

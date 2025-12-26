@@ -11,6 +11,12 @@ C++ invariants (non-negotiable):
 - Deterministic behavior (no randomness unless explicitly required)
 - No I/O unless explicitly specified (prefer pure functions)
 
+Problem quality rules (non-negotiable):
+- The description, tests, and reference_solution must describe and validate the SAME behavior.
+- Do NOT prescribe a specific algorithm unless it is guaranteed correct for all valid inputs.
+  (Example pitfall: "coin change with greedy" is not correct for arbitrary denominations.)
+- Prefer describing required behavior and constraints, then implement a correct reference_solution.
+
 Solution interface:
 - Provide a single entry function named solve(...)
 - solve(...) MUST return a value deterministically
