@@ -831,7 +831,10 @@ export async function generateFromSession(
     const activityId = crypto.randomUUID();
     const activityTitle = `Activity (${spec.problem_count} problems)`;
 
-    activityDb.create(activityId, userId, activityTitle, JSON.stringify(problems), undefined);
+    activityDb.create(activityId, userId, activityTitle, JSON.stringify(problems), undefined, {
+      status: "DRAFT",
+      timeLimitSeconds: null,
+    });
 
     // Link activity to session
     sessionDb.setActivityId(sessionId, activityId);

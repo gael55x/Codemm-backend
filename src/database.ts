@@ -115,10 +115,25 @@ export function initializeDatabase() {
       title TEXT NOT NULL,
       prompt TEXT,
       problems TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PUBLISHED',
+      time_limit_seconds INTEGER,
       created_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
+
+  const activityCols = db
+    .prepare(`PRAGMA table_info(activities)`)
+    .all() as { name: string }[];
+  const activityColSet = new Set(activityCols.map((c) => c.name));
+
+  if (!activityColSet.has("status")) {
+    // Existing DBs: treat old activities as already "live".
+    db.exec(`ALTER TABLE activities ADD COLUMN status TEXT NOT NULL DEFAULT 'PUBLISHED'`);
+  }
+  if (!activityColSet.has("time_limit_seconds")) {
+    db.exec(`ALTER TABLE activities ADD COLUMN time_limit_seconds INTEGER`);
+  }
 
   // Submissions table
   db.exec(`
@@ -183,6 +198,8 @@ export interface DBActivity {
   title: string;
   prompt?: string;
   problems: string; // JSON string
+  status?: string;
+  time_limit_seconds?: number | null;
   created_at: string;
 }
 
@@ -290,12 +307,21 @@ export const userDb = {
 
 // Activity operations
 export const activityDb = {
-  create: (id: string, userId: number, title: string, problems: string, prompt?: string) => {
+  create: (
+    id: string,
+    userId: number,
+    title: string,
+    problems: string,
+    prompt?: string,
+    opts?: { status?: "DRAFT" | "PUBLISHED"; timeLimitSeconds?: number | null }
+  ) => {
     const stmt = db.prepare(
-      `INSERT INTO activities (id, user_id, title, prompt, problems, created_at) 
-       VALUES (?, ?, ?, ?, ?, datetime('now'))`
+      `INSERT INTO activities (id, user_id, title, prompt, problems, status, time_limit_seconds, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
     );
-    stmt.run(id, userId, title, prompt || "", problems);
+    const status = opts?.status ?? "PUBLISHED";
+    const timeLimitSeconds = typeof opts?.timeLimitSeconds === "number" ? opts.timeLimitSeconds : null;
+    stmt.run(id, userId, title, prompt || "", problems, status, timeLimitSeconds);
   },
 
   findById: (id: string): DBActivity | undefined => {
@@ -313,6 +339,38 @@ export const activityDb = {
   delete: (id: string, userId: number) => {
     const stmt = db.prepare(`DELETE FROM activities WHERE id = ? AND user_id = ?`);
     stmt.run(id, userId);
+  },
+
+  updateByOwner: (
+    id: string,
+    userId: number,
+    patch: { title?: string; prompt?: string; time_limit_seconds?: number | null; status?: "DRAFT" | "PUBLISHED" }
+  ): DBActivity | undefined => {
+    const sets: string[] = [];
+    const args: any[] = [];
+
+    if (typeof patch.title === "string") {
+      sets.push("title = ?");
+      args.push(patch.title);
+    }
+    if (typeof patch.prompt === "string") {
+      sets.push("prompt = ?");
+      args.push(patch.prompt);
+    }
+    if (typeof patch.time_limit_seconds !== "undefined") {
+      sets.push("time_limit_seconds = ?");
+      args.push(patch.time_limit_seconds ?? null);
+    }
+    if (typeof patch.status === "string") {
+      sets.push("status = ?");
+      args.push(patch.status);
+    }
+
+    if (sets.length === 0) return activityDb.findById(id);
+
+    const stmt = db.prepare(`UPDATE activities SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`);
+    stmt.run(...args, id, userId);
+    return activityDb.findById(id);
   },
 };
 

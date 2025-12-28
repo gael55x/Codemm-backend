@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import { z } from "zod";
 import { LegacyGeneratedProblem } from "./types";
 import { initializeDatabase, userDb, activityDb, submissionDb } from "./database";
 import { sessionsRouter } from "./routes/sessions";
@@ -506,7 +507,7 @@ app.get("/profile", authenticateToken, (req: AuthRequest, res) => {
 });
 
 // Fetch an existing activity by id for the authenticated user
-app.get("/activities/:id", authenticateToken, (req: AuthRequest, res) => {
+app.get("/activities/:id", optionalAuth, (req: AuthRequest, res) => {
   const id = req.params.id as string;
   const dbActivity = activityDb.findById(id);
 
@@ -514,8 +515,11 @@ app.get("/activities/:id", authenticateToken, (req: AuthRequest, res) => {
     return res.status(404).json({ error: "Activity not found." });
   }
 
-  // Enforce ownership: users may only access their own activities
-  if (dbActivity.user_id !== req.user!.id) {
+  const isOwner = Boolean(req.user && dbActivity.user_id === req.user.id);
+  const isPublished = dbActivity.status === "PUBLISHED";
+
+  // Draft activities are private; published activities can be viewed by anyone.
+  if (!isOwner && !isPublished) {
     return res.status(403).json({ error: "You are not authorized to access this activity." });
   }
 
@@ -525,9 +529,79 @@ app.get("/activities/:id", authenticateToken, (req: AuthRequest, res) => {
       title: dbActivity.title,
       prompt: dbActivity.prompt || "",
       problems: JSON.parse(dbActivity.problems),
+      status: dbActivity.status ?? "PUBLISHED",
+      timeLimitSeconds: typeof dbActivity.time_limit_seconds === "number" ? dbActivity.time_limit_seconds : null,
       createdAt: dbActivity.created_at,
     },
   });
+});
+
+const UpdateActivitySchema = z
+  .object({
+    title: z.string().trim().min(1).max(160).optional(),
+    timeLimitSeconds: z.number().int().min(0).max(8 * 60 * 60).nullable().optional(),
+  })
+  .strict();
+
+app.patch("/activities/:id", authenticateToken, (req: AuthRequest, res) => {
+  const id = req.params.id as string;
+
+  const parsed = UpdateActivitySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid payload." });
+  }
+  const { title, timeLimitSeconds } = parsed.data;
+
+  const dbActivity = activityDb.findById(id);
+  if (!dbActivity) {
+    return res.status(404).json({ error: "Activity not found." });
+  }
+  if (dbActivity.user_id !== req.user!.id) {
+    return res.status(403).json({ error: "You are not authorized to edit this activity." });
+  }
+  if ((dbActivity.status ?? "PUBLISHED") !== "DRAFT") {
+    return res.status(409).json({ error: "This activity has already been published." });
+  }
+
+  const updated = activityDb.updateByOwner(id, req.user!.id, {
+    ...(typeof title === "string" ? { title } : {}),
+    ...(typeof timeLimitSeconds !== "undefined" ? { time_limit_seconds: timeLimitSeconds } : {}),
+  });
+
+  if (!updated) {
+    return res.status(500).json({ error: "Failed to update activity." });
+  }
+
+  res.json({
+    activity: {
+      id: updated.id,
+      title: updated.title,
+      prompt: updated.prompt || "",
+      problems: JSON.parse(updated.problems),
+      status: updated.status ?? "PUBLISHED",
+      timeLimitSeconds: typeof updated.time_limit_seconds === "number" ? updated.time_limit_seconds : null,
+      createdAt: updated.created_at,
+    },
+  });
+});
+
+app.post("/activities/:id/publish", authenticateToken, (req: AuthRequest, res) => {
+  const id = req.params.id as string;
+  const dbActivity = activityDb.findById(id);
+
+  if (!dbActivity) {
+    return res.status(404).json({ error: "Activity not found." });
+  }
+  if (dbActivity.user_id !== req.user!.id) {
+    return res.status(403).json({ error: "You are not authorized to publish this activity." });
+  }
+
+  if ((dbActivity.status ?? "PUBLISHED") === "PUBLISHED") {
+    return res.json({ ok: true });
+  }
+
+  activityDb.updateByOwner(id, req.user!.id, { status: "PUBLISHED" });
+  return res.json({ ok: true });
 });
 
 // Get all activities for the authenticated user
@@ -541,6 +615,8 @@ app.get("/activities", authenticateToken, (req: AuthRequest, res) => {
       title: act.title,
       prompt: act.prompt || "",
       problemCount: JSON.parse(act.problems).length,
+      status: act.status ?? "PUBLISHED",
+      timeLimitSeconds: typeof act.time_limit_seconds === "number" ? act.time_limit_seconds : null,
       createdAt: act.created_at,
     }));
 
