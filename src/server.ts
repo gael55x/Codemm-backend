@@ -20,6 +20,7 @@ import {
   AuthRequest,
 } from "./auth";
 import { updateLearnerProfileFromSubmission } from "./services/learnerProfileService";
+import { editDraftProblemWithAi } from "./services/activityProblemEditService";
 
 dotenv.config();
 
@@ -583,6 +584,75 @@ app.patch("/activities/:id", authenticateToken, (req: AuthRequest, res) => {
       createdAt: updated.created_at,
     },
   });
+});
+
+const EditActivityProblemSchema = z
+  .object({
+    instruction: z.string().trim().min(1).max(2000),
+  })
+  .strict();
+
+app.post("/activities/:id/problems/:problemId/ai-edit", authenticateToken, async (req: AuthRequest, res) => {
+  const id = req.params.id as string;
+  const problemId = req.params.problemId as string;
+
+  const parsed = EditActivityProblemSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid payload." });
+  }
+
+  const dbActivity = activityDb.findById(id);
+  if (!dbActivity) {
+    return res.status(404).json({ error: "Activity not found." });
+  }
+  if (dbActivity.user_id !== req.user!.id) {
+    return res.status(403).json({ error: "You are not authorized to edit this activity." });
+  }
+  if ((dbActivity.status ?? "PUBLISHED") !== "DRAFT") {
+    return res.status(409).json({ error: "This activity has already been published." });
+  }
+
+  let problems: any[] = [];
+  try {
+    const parsedProblems = JSON.parse(dbActivity.problems);
+    problems = Array.isArray(parsedProblems) ? parsedProblems : [];
+  } catch {
+    return res.status(500).json({ error: "Failed to load activity problems." });
+  }
+
+  const idx = problems.findIndex((p) => p && typeof p === "object" && (p as any).id === problemId);
+  if (idx < 0) {
+    return res.status(404).json({ error: "Problem not found." });
+  }
+
+  try {
+    const updatedProblem = await editDraftProblemWithAi({
+      existing: problems[idx],
+      instruction: parsed.data.instruction,
+    });
+    const nextProblems = [...problems];
+    nextProblems[idx] = updatedProblem;
+
+    const updated = activityDb.updateByOwner(id, req.user!.id, { problems: JSON.stringify(nextProblems) });
+    if (!updated) {
+      return res.status(500).json({ error: "Failed to update activity." });
+    }
+
+    return res.json({
+      activity: {
+        id: updated.id,
+        title: updated.title,
+        prompt: updated.prompt || "",
+        problems: JSON.parse(updated.problems),
+        status: updated.status ?? "PUBLISHED",
+        timeLimitSeconds: typeof updated.time_limit_seconds === "number" ? updated.time_limit_seconds : null,
+        createdAt: updated.created_at,
+      },
+    });
+  } catch (err: any) {
+    console.error("Error in POST /activities/:id/problems/:problemId/ai-edit:", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to edit problem." });
+  }
 });
 
 app.post("/activities/:id/publish", authenticateToken, (req: AuthRequest, res) => {

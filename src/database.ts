@@ -344,7 +344,13 @@ export const activityDb = {
   updateByOwner: (
     id: string,
     userId: number,
-    patch: { title?: string; prompt?: string; time_limit_seconds?: number | null; status?: "DRAFT" | "PUBLISHED" }
+    patch: {
+      title?: string;
+      prompt?: string;
+      problems?: string;
+      time_limit_seconds?: number | null;
+      status?: "DRAFT" | "PUBLISHED";
+    }
   ): DBActivity | undefined => {
     const sets: string[] = [];
     const args: any[] = [];
@@ -356,6 +362,10 @@ export const activityDb = {
     if (typeof patch.prompt === "string") {
       sets.push("prompt = ?");
       args.push(patch.prompt);
+    }
+    if (typeof patch.problems === "string") {
+      sets.push("problems = ?");
+      args.push(patch.problems);
     }
     if (typeof patch.time_limit_seconds !== "undefined") {
       sets.push("time_limit_seconds = ?");
