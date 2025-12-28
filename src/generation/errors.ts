@@ -1,4 +1,5 @@
 import type { GenerationOutcome } from "../contracts/generationOutcome";
+import type { GeneratedProblem } from "../contracts/problem";
 
 export type GenerationFailureKind =
   | "compile"
@@ -32,6 +33,7 @@ export class GenerationSlotFailureError extends Error {
   title: string | undefined;
   llmOutputHash: string | undefined;
   outcomesSoFar: GenerationOutcome[] | undefined;
+  problemsSoFar: GeneratedProblem[] | undefined;
 
   constructor(
     message: string,
@@ -42,6 +44,7 @@ export class GenerationSlotFailureError extends Error {
       title?: string;
       llmOutputHash?: string;
       outcomesSoFar?: GenerationOutcome[];
+      problemsSoFar?: GeneratedProblem[];
     }
   ) {
     super(message);
@@ -52,5 +55,6 @@ export class GenerationSlotFailureError extends Error {
     this.title = opts.title;
     this.llmOutputHash = opts.llmOutputHash;
     this.outcomesSoFar = opts.outcomesSoFar;
+    this.problemsSoFar = opts.problemsSoFar;
   }
 }

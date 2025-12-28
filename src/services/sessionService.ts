@@ -665,9 +665,9 @@ export async function generateFromSession(
       throw err;
     }
 
-    // Guard: reject if problems already generated (prevent accidental re-generation)
-    if (s.problems_json && s.problems_json.trim()) {
-      const err = new Error("Session already has generated problems. Cannot re-generate.");
+    // If an activity already exists, this session is effectively immutable.
+    if (typeof s.activity_id === "string" && s.activity_id.trim()) {
+      const err = new Error("Session already produced an activity. Cannot re-generate.");
       (err as any).status = 409;
       throw err;
     }
@@ -718,37 +718,73 @@ export async function generateFromSession(
       throw new Error(`Language "${spec.language}" is not supported for generation yet.`);
     }
 
+    const parseGeneratedProblems = (json: string | null | undefined): GeneratedProblem[] => {
+      if (!json || !json.trim()) return [];
+      try {
+        const parsed = JSON.parse(json);
+        if (!Array.isArray(parsed)) return [];
+        // Best-effort shape check; contracts are enforced during generation.
+        return parsed.filter((p) => p && typeof p === "object" && typeof (p as any).id === "string") as GeneratedProblem[];
+      } catch {
+        return [];
+      }
+    };
+
+    let resumeProblems: GeneratedProblem[] = parseGeneratedProblems(s.problems_json);
+    let resumeOutcomes: GenerationOutcome[] = parseGenerationOutcomes(s.generation_outcomes_json);
+    if (resumeOutcomes.length !== resumeProblems.length) {
+      // Keep problems as source of truth for resume; outcomes are informational.
+      resumeOutcomes = resumeOutcomes.slice(0, resumeProblems.length);
+    }
+
     let problems: GeneratedProblem[] | null = null;
     let outcomes: GenerationOutcome[] | null = null;
     let usedFallback = false;
     let appliedFallbackReason: string | null = null;
 
-    for (let attempt = 0; attempt < 2 && !problems; attempt++) {
-      // Derive ProblemPlan (always from current spec)
-      const pedagogyPolicy =
-        learning_mode === "guided"
-          ? buildGuidedPedagogyPolicy({ spec, learnerProfile: getLearnerProfile({ userId, language: spec.language }) })
-          : undefined;
-      const plan = deriveProblemPlan(spec, pedagogyPolicy);
-      sessionDb.setPlanJson(sessionId, JSON.stringify(plan));
-      publishGenerationProgress(sessionId, {
-        type: "generation_started",
-        totalSlots: plan.length,
-        totalProblems: plan.length,
-        run: attempt + 1,
-      });
+    // Derive initial ProblemPlan (always from current spec)
+    const pedagogyPolicy =
+      learning_mode === "guided"
+        ? buildGuidedPedagogyPolicy({ spec, learnerProfile: getLearnerProfile({ userId, language: spec.language }) })
+        : undefined;
+    let plan = deriveProblemPlan(spec, pedagogyPolicy);
+    sessionDb.setPlanJson(sessionId, JSON.stringify(plan));
+    publishGenerationProgress(sessionId, {
+      type: "generation_started",
+      totalSlots: plan.length,
+      totalProblems: plan.length,
+      run: 1,
+    });
 
+    // If we have a checkpoint, mark those slots as done in the progress UI immediately.
+    if (resumeProblems.length > 0) {
+      for (let i = 0; i < Math.min(resumeProblems.length, plan.length); i++) {
+        publishGenerationProgress(sessionId, { type: "slot_completed", slotIndex: i });
+      }
+    }
+
+    while (!problems) {
       try {
         // Generate problems (per-slot with retries + Docker validation + discard reference_solution)
         const generated = await generateProblemsFromPlan(plan, {
+          resume: { problems: resumeProblems, outcomes: resumeOutcomes },
           onProgress: (event: GenerationProgressEvent) => publishGenerationProgress(sessionId, event),
+          onCheckpoint: ({ problems: p, outcomes: o }) => {
+            sessionDb.setProblemsJson(sessionId, JSON.stringify(p));
+            sessionDb.updateGenerationOutcomesJson(sessionId, JSON.stringify(o));
+          },
         });
         problems = generated.problems;
         outcomes = generated.outcomes;
       } catch (err: any) {
         if (err instanceof GenerationSlotFailureError) {
+          if (Array.isArray(err.problemsSoFar)) {
+            resumeProblems = err.problemsSoFar;
+            sessionDb.setProblemsJson(sessionId, JSON.stringify(resumeProblems));
+          }
           if (Array.isArray(err.outcomesSoFar)) {
-            sessionDb.updateGenerationOutcomesJson(sessionId, JSON.stringify(err.outcomesSoFar));
+            resumeOutcomes = err.outcomesSoFar;
+            sessionDb.updateGenerationOutcomesJson(sessionId, JSON.stringify(resumeOutcomes));
           }
 
           persistTraceEvent({
@@ -799,6 +835,10 @@ export async function generateFromSession(
 
               spec = adjustedRes.data;
               sessionDb.updateSpecJson(sessionId, JSON.stringify(spec));
+
+              // Update plan for remaining slots (we keep already generated problems as a checkpoint).
+              plan = deriveProblemPlan(spec, pedagogyPolicy);
+              sessionDb.setPlanJson(sessionId, JSON.stringify(plan));
               continue;
             }
           }
@@ -854,13 +894,13 @@ export async function generateFromSession(
 
       return { activityId, problems };
     } catch (err: any) {
-    // Transition to FAILED
+    // Transition back to READY so the user can retry generation (checkpointed problems may exist).
     try {
-      transitionOrThrow("GENERATING", "FAILED");
-      sessionDb.updateState(sessionId, "FAILED");
+      transitionOrThrow("GENERATING", "READY");
+      sessionDb.updateState(sessionId, "READY");
       sessionDb.setLastError(sessionId, err.message ?? "Unknown error during generation.");
     } catch (transitionErr) {
-      console.error("Failed to transition session to FAILED:", transitionErr);
+      console.error("Failed to transition session to READY:", transitionErr);
     }
 
       publishGenerationProgress(sessionId, {

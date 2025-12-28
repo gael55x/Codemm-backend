@@ -42,16 +42,31 @@ export async function generateProblemsFromPlan(
   plan: ProblemPlan,
   opts?: {
     onProgress?: (event: GenerationProgressEvent) => void;
+    resume?: { problems: GeneratedProblem[]; outcomes: GenerationOutcome[] };
+    onCheckpoint?: (state: {
+      problems: GeneratedProblem[];
+      outcomes: GenerationOutcome[];
+      completedSlotIndex: number;
+    }) => void;
     deps?: {
       generateSingleProblem?: typeof generateSingleProblem;
       validateReferenceSolution?: typeof validateReferenceSolution;
     };
   }
 ): Promise<{ problems: GeneratedProblem[]; outcomes: GenerationOutcome[] }> {
-  const problems: GeneratedProblem[] = [];
-  const outcomes: GenerationOutcome[] = [];
+  const resumeProblems = Array.isArray(opts?.resume?.problems) ? opts!.resume!.problems : [];
+  const resumeOutcomes = Array.isArray(opts?.resume?.outcomes) ? opts!.resume!.outcomes : [];
+
+  const initialCount =
+    resumeProblems.length === resumeOutcomes.length && resumeProblems.length <= plan.length
+      ? resumeProblems.length
+      : 0;
+
+  const problems: GeneratedProblem[] = initialCount ? [...resumeProblems.slice(0, initialCount)] : [];
+  const outcomes: GenerationOutcome[] = initialCount ? [...resumeOutcomes.slice(0, initialCount)] : [];
   const maxAttempts = 3;
   const onProgress = opts?.onProgress;
+  const onCheckpoint = opts?.onCheckpoint;
   const generateSingleProblemFn = opts?.deps?.generateSingleProblem ?? generateSingleProblem;
   const validateReferenceSolutionFn = opts?.deps?.validateReferenceSolution ?? validateReferenceSolution;
   const usedDomains: string[] = [];
@@ -99,7 +114,18 @@ export async function generateProblemsFromPlan(
     return DOMAIN_POOL[start]!;
   }
 
-  for (const slot of plan) {
+  // Warm up deterministic "used domains/titles" for resume scenarios so later slots still
+  // get domain diversity and title avoidance.
+  for (let i = 0; i < initialCount; i++) {
+    const slot = plan[i];
+    if (!slot) continue;
+    const domainSeed = pickDomain(`${slot.language}:${slot.difficulty}:${slot.topics.join(",")}:${slot.index}`);
+    usedDomains.push(domainSeed);
+    const title = problems[i]?.title;
+    if (typeof title === "string" && title.trim()) usedTitles.push(title);
+  }
+
+  for (const slot of plan.slice(initialCount)) {
     const domainSeed = pickDomain(`${slot.language}:${slot.difficulty}:${slot.topics.join(",")}:${slot.index}`);
     const promptContext: SlotPromptContext = {
       domain: domainSeed,
@@ -241,6 +267,7 @@ export async function generateProblemsFromPlan(
               ...(typeof lastDraft?.title === "string" ? { title: lastDraft.title } : {}),
               ...(typeof lastLlmOutputHash === "string" ? { llmOutputHash: lastLlmOutputHash } : {}),
               outcomesSoFar: [...outcomes, failOutcome],
+              problemsSoFar: [...problems],
             }
           );
         }
@@ -258,6 +285,7 @@ export async function generateProblemsFromPlan(
     outcomes.push({ slotIndex: slot.index, success: true, retries: Math.max(0, attempts - 1) });
     usedDomains.push(domainSeed);
     usedTitles.push(problem.title);
+    onCheckpoint?.({ problems, outcomes, completedSlotIndex: slot.index });
   }
 
   return { problems, outcomes };
