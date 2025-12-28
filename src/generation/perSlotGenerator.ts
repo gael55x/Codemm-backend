@@ -59,6 +59,12 @@ ${signature} {
 `;
 }
 
+export const __test__ = {
+  stripCppComments,
+  extractCppSolveSignature,
+  synthesizeCppStarterCodeFromReference,
+};
+
 export type RepairContext = {
   previousDraft?: GeneratedProblemDraft;
   previousRaw?: string;
