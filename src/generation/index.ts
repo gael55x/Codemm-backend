@@ -64,7 +64,7 @@ export async function generateProblemsFromPlan(
 
   const problems: GeneratedProblem[] = initialCount ? [...resumeProblems.slice(0, initialCount)] : [];
   const outcomes: GenerationOutcome[] = initialCount ? [...resumeOutcomes.slice(0, initialCount)] : [];
-  const maxAttempts = 3;
+  const defaultMaxAttempts = 3;
   const onProgress = opts?.onProgress;
   const onCheckpoint = opts?.onCheckpoint;
   const generateSingleProblemFn = opts?.deps?.generateSingleProblem ?? generateSingleProblem;
@@ -126,6 +126,7 @@ export async function generateProblemsFromPlan(
   }
 
   for (const slot of plan.slice(initialCount)) {
+    const maxAttempts = slot.language === "cpp" ? 5 : defaultMaxAttempts;
     const domainSeed = pickDomain(`${slot.language}:${slot.difficulty}:${slot.topics.join(",")}:${slot.index}`);
     const promptContext: SlotPromptContext = {
       domain: domainSeed,
