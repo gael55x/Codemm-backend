@@ -24,6 +24,8 @@ function scheduleCleanup(sessionId: string, channel: Channel): void {
   channel.cleanupTimer = setTimeout(() => {
     channelsBySessionId.delete(sessionId);
   }, 5 * 60 * 1000);
+  // Allow the process to exit naturally (important for tests/CLI).
+  channel.cleanupTimer.unref?.();
 }
 
 export function publishGenerationProgress(sessionId: string, event: GenerationProgressEvent): void {
