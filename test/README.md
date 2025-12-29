@@ -19,3 +19,9 @@ Codemm backend uses Node's built-in test runner (`node:test`) with CommonJS test
 
 - Prefer deterministic tests (no network, no real LLM calls, no Docker).
 - When you need the DB, require `test/helpers/setupDb` before importing `src/database` (each test should do this itself so it runs per test file/worker).
+
+## Real-LLM e2e (required)
+
+- `test/integration/llm/realActivityGenerationE2e.test.js` runs the full flow (dialogue + generation + Docker validation) and requires:
+  - `CODEX_API_KEY` in the environment
+  - local Docker running + judge images built (`./run-codem-backend.sh`)
