@@ -117,6 +117,9 @@ export function initializeDatabase() {
       problems TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'PUBLISHED',
       time_limit_seconds INTEGER,
+      community_published_at TEXT,
+      community_summary TEXT,
+      community_tags TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
@@ -133,6 +136,15 @@ export function initializeDatabase() {
   }
   if (!activityColSet.has("time_limit_seconds")) {
     db.exec(`ALTER TABLE activities ADD COLUMN time_limit_seconds INTEGER`);
+  }
+  if (!activityColSet.has("community_published_at")) {
+    db.exec(`ALTER TABLE activities ADD COLUMN community_published_at TEXT`);
+  }
+  if (!activityColSet.has("community_summary")) {
+    db.exec(`ALTER TABLE activities ADD COLUMN community_summary TEXT`);
+  }
+  if (!activityColSet.has("community_tags")) {
+    db.exec(`ALTER TABLE activities ADD COLUMN community_tags TEXT`);
   }
 
   // Submissions table
@@ -175,6 +187,7 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_session_messages_session_id ON session_messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_session_collectors_session_id ON session_collectors(session_id);
     CREATE INDEX IF NOT EXISTS idx_activities_user_id ON activities(user_id);
+    CREATE INDEX IF NOT EXISTS idx_activities_community_published_at ON activities(community_published_at);
     CREATE INDEX IF NOT EXISTS idx_submissions_user_id ON submissions(user_id);
     CREATE INDEX IF NOT EXISTS idx_submissions_activity_id ON submissions(activity_id);
   `);
@@ -200,6 +213,9 @@ export interface DBActivity {
   problems: string; // JSON string
   status?: string;
   time_limit_seconds?: number | null;
+  community_published_at?: string | null;
+  community_summary?: string | null;
+  community_tags?: string | null;
   created_at: string;
 }
 
@@ -350,6 +366,9 @@ export const activityDb = {
       problems?: string;
       time_limit_seconds?: number | null;
       status?: "DRAFT" | "PUBLISHED";
+      community_published_at?: string | null;
+      community_summary?: string | null;
+      community_tags?: string | null;
     }
   ): DBActivity | undefined => {
     const sets: string[] = [];
@@ -375,12 +394,55 @@ export const activityDb = {
       sets.push("status = ?");
       args.push(patch.status);
     }
+    if (typeof patch.community_published_at !== "undefined") {
+      sets.push("community_published_at = ?");
+      args.push(patch.community_published_at ?? null);
+    }
+    if (typeof patch.community_summary !== "undefined") {
+      sets.push("community_summary = ?");
+      args.push(patch.community_summary ?? null);
+    }
+    if (typeof patch.community_tags !== "undefined") {
+      sets.push("community_tags = ?");
+      args.push(patch.community_tags ?? null);
+    }
 
     if (sets.length === 0) return activityDb.findById(id);
 
     const stmt = db.prepare(`UPDATE activities SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`);
     stmt.run(...args, id, userId);
     return activityDb.findById(id);
+  },
+
+  listCommunity: (limit: number, offset: number) => {
+    const stmt = db.prepare(`
+      SELECT
+        a.*,
+        u.username AS author_username,
+        COALESCE(u.display_name, u.username) AS author_display_name
+      FROM activities a
+      JOIN users u ON u.id = a.user_id
+      WHERE a.community_published_at IS NOT NULL AND a.status = 'PUBLISHED'
+      ORDER BY a.community_published_at DESC, a.id DESC
+      LIMIT ? OFFSET ?
+    `);
+    return stmt.all(limit, offset) as Array<
+      DBActivity & { author_username: string; author_display_name: string }
+    >;
+  },
+
+  findCommunityById: (id: string) => {
+    const stmt = db.prepare(`
+      SELECT
+        a.*,
+        u.username AS author_username,
+        COALESCE(u.display_name, u.username) AS author_display_name
+      FROM activities a
+      JOIN users u ON u.id = a.user_id
+      WHERE a.id = ? AND a.community_published_at IS NOT NULL AND a.status = 'PUBLISHED'
+      LIMIT 1
+    `);
+    return stmt.get(id) as (DBActivity & { author_username: string; author_display_name: string }) | undefined;
   },
 };
 
