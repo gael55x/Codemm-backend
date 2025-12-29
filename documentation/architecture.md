@@ -91,10 +91,11 @@ When a session is `READY`, `POST /sessions/:id/generate` runs:
 4) **Problem contract validation** (strict Zod): `src/contracts/problem.ts`
 5) **Docker verification**: compile + run tests against a generated reference artifact
    - `src/generation/referenceSolutionValidator.ts`
-6) **Guided scaffolding (deterministic)**: when a slot contains pedagogy metadata, the student-facing code/workspace is scaffolded from the validated reference artifact:
+6) **Guided scaffolding (deterministic core)**: when a slot contains pedagogy metadata, the student-facing code/workspace is scaffolded from the validated reference artifact:
    - code is removed (structure preserved)
    - tests are unchanged
    - removed regions are wrapped with `BEGIN STUDENT TODO` / `END STUDENT TODO` markers (language-aware)
+   - optional: short hint comments may be generated best-effort by the LLM and inserted into the TODO block (does not affect tests/verification; can be disabled with `CODEMM_DYNAMIC_GUIDED_HINTS=0`)
    - reference artifacts never contain markers and are discarded before persistence
 7) **Safety rule**: reference artifacts are discarded before persistence (only learner-facing fields are stored).
 

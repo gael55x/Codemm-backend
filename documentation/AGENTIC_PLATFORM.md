@@ -10,7 +10,7 @@ This document captures the current “agentic, but deterministic” system desig
 - **SpecBuilder** (`/sessions`): 1 LLM call per user turn proposes a partial `ActivitySpec` patch; deterministic reducers apply patches, enforce Zod schemas/invariants, and pick the next question.
 - **Generation** (`/sessions/:id/generate`): deterministic plan → per-slot generation → strict contracts → Docker validation → persist (reference artifacts discarded).
 - **Execution/Judging**: `/run` (Java/Python/C++) and `/submit` (Java/Python/C++/SQL) inside Docker.
-- **Guided Mode**: scaffolding is derived deterministically from validated reference artifacts; tests never change.
+- **Guided Mode**: core scaffolding is derived deterministically from validated reference artifacts; tests never change (optional best-effort hint comments can be injected).
 - **Observability**: progress SSE + optional sanitized trace SSE (no prompts/raw generations/reference artifacts streamed).
 
 ## Single End-to-End Diagram
@@ -51,7 +51,7 @@ flowchart TB
     SLOT["Per-slot generator + repair prompts<br/>src/generation/perSlotGenerator.ts"]
     PROBV["Problem contract validation<br/>src/contracts/problem.ts"]
     DOCKER["Docker validate reference artifact<br/>src/generation/referenceSolutionValidator.ts"]
-    SCAFF["Guided scaffolding from reference (deterministic)<br/>src/generation/scaffolding.ts"]
+    SCAFF["Guided scaffolding from reference (deterministic core)<br/>+ optional hint comments<br/>src/generation/scaffolding.ts"]
     DISC["Discard reference artifacts (never persist)"]
     PERSIST["Persist Activity problems<br/>src/services/sessionService.ts"]
   end
@@ -115,4 +115,3 @@ flowchart TB
   - `/submit` is the safety boundary for learner code
 - No chain-of-thought is stored or streamed:
   - trace/progress streams are structured and sanitized
-
