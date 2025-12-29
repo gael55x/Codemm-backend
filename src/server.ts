@@ -532,9 +532,123 @@ app.get("/activities/:id", optionalAuth, (req: AuthRequest, res) => {
       problems: JSON.parse(dbActivity.problems),
       status: dbActivity.status ?? "PUBLISHED",
       timeLimitSeconds: typeof dbActivity.time_limit_seconds === "number" ? dbActivity.time_limit_seconds : null,
+      communityPublishedAt: dbActivity.community_published_at ?? null,
+      communitySummary: dbActivity.community_summary ?? null,
+      communityTags: (() => {
+        try {
+          return dbActivity.community_tags ? JSON.parse(dbActivity.community_tags) : [];
+        } catch {
+          return [];
+        }
+      })(),
       createdAt: dbActivity.created_at,
     },
   });
+});
+
+const CommunityListQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(50).optional(),
+    offset: z.coerce.number().int().min(0).optional(),
+  })
+  .strict();
+
+// Public: list community-published activities (discoverable)
+app.get("/community/activities", (req, res) => {
+  const parsed = CommunityListQuerySchema.safeParse(req.query ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid query." });
+  }
+  const limit = parsed.data.limit ?? 20;
+  const offset = parsed.data.offset ?? 0;
+
+  try {
+    const rows = activityDb.listCommunity(limit, offset);
+    const activities = rows.map((a) => {
+      let problemCount = 0;
+      try {
+        const parsedProblems = JSON.parse(a.problems);
+        problemCount = Array.isArray(parsedProblems) ? parsedProblems.length : 0;
+      } catch {
+        problemCount = 0;
+      }
+      let tags: string[] = [];
+      try {
+        const parsedTags = a.community_tags ? JSON.parse(a.community_tags) : [];
+        tags = Array.isArray(parsedTags) ? parsedTags.filter((t) => typeof t === "string") : [];
+      } catch {
+        tags = [];
+      }
+
+      return {
+        id: a.id,
+        title: a.title,
+        communitySummary: a.community_summary ?? null,
+        communityTags: tags,
+        communityPublishedAt: a.community_published_at ?? null,
+        createdAt: a.created_at,
+        problemCount,
+        author: {
+          username: (a as any).author_username as string,
+          displayName: (a as any).author_display_name as string,
+        },
+      };
+    });
+
+    return res.json({
+      activities,
+      nextOffset: activities.length === limit ? offset + limit : null,
+    });
+  } catch (err: any) {
+    console.error("Error in GET /community/activities:", err);
+    return res.status(500).json({ error: "Failed to fetch community activities." });
+  }
+});
+
+// Public: fetch a single community-published activity
+app.get("/community/activities/:id", (req, res) => {
+  const id = req.params.id as string;
+  try {
+    const row = activityDb.findCommunityById(id);
+    if (!row) return res.status(404).json({ error: "Community activity not found." });
+
+    let tags: string[] = [];
+    try {
+      const parsedTags = row.community_tags ? JSON.parse(row.community_tags) : [];
+      tags = Array.isArray(parsedTags) ? parsedTags.filter((t) => typeof t === "string") : [];
+    } catch {
+      tags = [];
+    }
+
+    return res.json({
+      activity: {
+        id: row.id,
+        title: row.title,
+        prompt: row.prompt || "",
+        problems: (() => {
+          try {
+            const parsedProblems = JSON.parse(row.problems);
+            return Array.isArray(parsedProblems) ? parsedProblems : [];
+          } catch {
+            return [];
+          }
+        })(),
+        status: row.status ?? "PUBLISHED",
+        timeLimitSeconds: typeof row.time_limit_seconds === "number" ? row.time_limit_seconds : null,
+        communityPublishedAt: row.community_published_at ?? null,
+        communitySummary: row.community_summary ?? null,
+        communityTags: tags,
+        createdAt: row.created_at,
+        author: {
+          username: (row as any).author_username as string,
+          displayName: (row as any).author_display_name as string,
+        },
+      },
+    });
+  } catch (err: any) {
+    console.error("Error in GET /community/activities/:id:", err);
+    return res.status(500).json({ error: "Failed to fetch community activity." });
+  }
 });
 
 const UpdateActivitySchema = z
@@ -674,6 +788,73 @@ app.post("/activities/:id/publish", authenticateToken, (req: AuthRequest, res) =
   return res.json({ ok: true });
 });
 
+const PublishToCommunitySchema = z
+  .object({
+    summary: z.string().trim().min(1).max(240).optional(),
+    tags: z
+      .array(z.string().trim().min(1).max(24))
+      .max(10)
+      .optional(),
+  })
+  .strict();
+
+// Owner-only: publish a (already published) activity to the community for discovery.
+app.post("/activities/:id/community/publish", authenticateToken, (req: AuthRequest, res) => {
+  const id = req.params.id as string;
+  const parsed = PublishToCommunitySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid payload." });
+  }
+
+  const dbActivity = activityDb.findById(id);
+  if (!dbActivity) {
+    return res.status(404).json({ error: "Activity not found." });
+  }
+  if (dbActivity.user_id !== req.user!.id) {
+    return res.status(403).json({ error: "You are not authorized to publish this activity to the community." });
+  }
+
+  if ((dbActivity.status ?? "PUBLISHED") !== "PUBLISHED") {
+    return res.status(409).json({ error: "Publish the activity first before sharing it to the community." });
+  }
+
+  const now = new Date().toISOString();
+  const nextSummary =
+    typeof parsed.data.summary === "string" ? parsed.data.summary : (dbActivity.community_summary ?? null);
+  const nextTags =
+    Array.isArray(parsed.data.tags) ? JSON.stringify(parsed.data.tags) : (dbActivity.community_tags ?? null);
+
+  const updated = activityDb.updateByOwner(id, req.user!.id, {
+    community_published_at: dbActivity.community_published_at ?? now,
+    community_summary: nextSummary,
+    community_tags: nextTags,
+  });
+
+  if (!updated) {
+    return res.status(500).json({ error: "Failed to publish to community." });
+  }
+
+  return res.json({ ok: true, communityPublishedAt: updated.community_published_at ?? null });
+});
+
+// Owner-only: remove an activity from the community feed.
+app.post("/activities/:id/community/unpublish", authenticateToken, (req: AuthRequest, res) => {
+  const id = req.params.id as string;
+  const dbActivity = activityDb.findById(id);
+  if (!dbActivity) {
+    return res.status(404).json({ error: "Activity not found." });
+  }
+  if (dbActivity.user_id !== req.user!.id) {
+    return res.status(403).json({ error: "You are not authorized to unpublish this activity." });
+  }
+
+  const updated = activityDb.updateByOwner(id, req.user!.id, { community_published_at: null });
+  if (!updated) {
+    return res.status(500).json({ error: "Failed to unpublish from community." });
+  }
+  return res.json({ ok: true });
+});
+
 // Get all activities for the authenticated user
 app.get("/activities", authenticateToken, (req: AuthRequest, res) => {
   try {
@@ -687,6 +868,7 @@ app.get("/activities", authenticateToken, (req: AuthRequest, res) => {
       problemCount: JSON.parse(act.problems).length,
       status: act.status ?? "PUBLISHED",
       timeLimitSeconds: typeof act.time_limit_seconds === "number" ? act.time_limit_seconds : null,
+      communityPublishedAt: act.community_published_at ?? null,
       createdAt: act.created_at,
     }));
 
@@ -697,6 +879,10 @@ app.get("/activities", authenticateToken, (req: AuthRequest, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Codem backend listening on port ${port}`);
-});
+export { app };
+
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Codem backend listening on port ${port}`);
+  });
+}
