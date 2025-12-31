@@ -15,6 +15,13 @@ Codemm backend uses Node's built-in test runner (`node:test`) with CommonJS test
 - `npm run test:integration`: run integration tests only.
 - `node scripts/runTests.js unit generation`: run tests for one component folder.
 
+## Key integration suites
+
+| Test file | Uses DB | Uses Docker judges | Uses real LLM | What it validates | How to scope it down |
+|---|---:|---:|---:|---|---|
+| `test/integration/languages/activityGenerationEdgeCases.test.js` | ✅ | ❌ | ❌ (stubs) | Dialogue/spec edge-cases + generation plumbing without Docker/LLM flakiness | Run normally; it’s fast |
+| `test/integration/llm/realActivityGenerationE2e.test.js` | ✅ | ✅ | ✅ | Full production flow: prompt → dialogue → plan → per-slot generation → Docker validation → activity persisted | Use `CODEMM_E2E_LANGS`, `CODEMM_E2E_STYLES`, `CODEMM_E2E_COUNTS` (comma-separated) |
+
 ## Conventions
 
 - Prefer deterministic tests (no network, no real LLM calls, no Docker).
@@ -25,3 +32,26 @@ Codemm backend uses Node's built-in test runner (`node:test`) with CommonJS test
 - `test/integration/llm/realActivityGenerationE2e.test.js` runs the full flow (dialogue + generation + Docker validation) and requires:
   - `CODEX_API_KEY` in the environment
   - local Docker running + judge images built (`./run-codem-backend.sh`)
+
+Defaults: this test only runs `CODEMM_E2E_COUNTS=2` unless you override it.
+
+To run a single “cell” in the matrix:
+- `CODEMM_E2E_LANGS=java CODEMM_E2E_STYLES=stdout CODEMM_E2E_COUNTS=2 npm run test:integration`
+
+## Debugging generation failures (the errors in your log)
+
+The real-LLM e2e test ultimately calls `generateFromSession()`, which calls `generateProblemsFromPlan()` (per-slot retries).
+
+When a slot fails after retries, you’ll see a `GenerationSlotFailureError` like:
+- `kind="contract"`: LLM output didn’t match the schema/format rules (most commonly `test_suite` shape).
+- `kind="tests"` / `kind="compile"` / `kind="timeout"`: Docker judge ran the reference solution and it failed.
+
+To see the raw per-slot LLM output + judge stdout/stderr in your terminal:
+- `CODEMM_TRACE=1 CODEMM_TRACE_FULL=1 npm run test:integration`
+
+| Failure kind | Where it comes from | What it usually means | What to inspect next |
+|---|---|---|---|
+| `contract` | `src/generation/perSlotGenerator.ts` schema/style checks | Bad JSON / missing fields / wrong `test_suite` format | The “Last error:” message + the generated draft’s `test_suite` format rules for that language |
+| `tests` | `src/generation/referenceSolutionValidator.ts` (Docker) | Reference solution and tests disagree (or tests are too strict/brittle) | Judge output showing the first failing test (e.g. JUnit `expected … but was …`) |
+| `compile` | `src/generation/referenceSolutionValidator.ts` (Docker) | Reference solution didn’t compile | Judge stderr/compile output |
+| `timeout` | `src/generation/referenceSolutionValidator.ts` (Docker) | Judge timed out (infinite loop / very slow solution/tests) | Judge stdout/stderr + consider tightening generator prompts |

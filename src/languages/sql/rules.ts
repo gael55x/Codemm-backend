@@ -119,34 +119,79 @@ export function coerceSqlTestSuiteToJsonString(raw: unknown, testCount: number):
 }
 
 export function isValidSqlTestSuite(raw: string, testCount: number): boolean {
+  return diagnoseSqlTestSuite(raw, testCount).length === 0;
+}
+
+export function diagnoseSqlTestSuite(raw: string, testCount: number): string[] {
+  const issues: string[] = [];
+
   let parsed: any;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return false;
+    return ["test_suite is not valid JSON."];
   }
-  if (!parsed || typeof parsed !== "object") return false;
-  if (typeof parsed.schema_sql !== "string" || !parsed.schema_sql.trim()) return false;
-  if (!Array.isArray(parsed.cases) || parsed.cases.length !== testCount) return false;
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return ["test_suite must be a JSON object."];
+  }
+
+  if (typeof parsed.schema_sql !== "string" || !parsed.schema_sql.trim()) {
+    issues.push("Missing or empty `schema_sql`.");
+  }
+
+  if (!Array.isArray(parsed.cases)) {
+    issues.push("Missing `cases` array.");
+    return issues;
+  }
+
+  if (parsed.cases.length !== testCount) {
+    issues.push(`\`cases\` must have exactly ${testCount} items (found ${parsed.cases.length}).`);
+  }
 
   const seen = new Set<string>();
-  for (const c of parsed.cases) {
-    if (!c || typeof c !== "object") return false;
-    if (typeof c.name !== "string") return false;
-    const name = c.name.trim();
-    if (!/^test_case_[1-8]$/.test(name)) return false;
-    if (seen.has(name)) return false;
-    seen.add(name);
-    if (typeof c.seed_sql !== "string") return false;
-    const exp = c.expected;
-    if (!exp || typeof exp !== "object") return false;
-    if (!Array.isArray(exp.columns) || exp.columns.length === 0) return false;
-    if (!Array.isArray(exp.rows)) return false;
+  for (const [idx, c] of parsed.cases.entries()) {
+    if (!c || typeof c !== "object" || Array.isArray(c)) {
+      issues.push(`cases[${idx}] must be an object.`);
+      continue;
+    }
+
+    if (typeof c.name !== "string" || !c.name.trim()) {
+      issues.push(`cases[${idx}].name must be a non-empty string.`);
+    } else {
+      const name = c.name.trim();
+      if (!/^test_case_[1-8]$/.test(name)) {
+        issues.push(`cases[${idx}].name must match test_case_1..test_case_8 (got "${name}").`);
+      } else if (seen.has(name)) {
+        issues.push(`Duplicate test case name "${name}".`);
+      } else {
+        seen.add(name);
+      }
+    }
+
+    if (typeof c.seed_sql !== "string") {
+      issues.push(`cases[${idx}].seed_sql must be a string.`);
+    }
+
+    const exp = (c as any).expected;
+    if (!exp || typeof exp !== "object" || Array.isArray(exp)) {
+      issues.push(`cases[${idx}].expected must be an object with { columns, rows }.`);
+      continue;
+    }
+    if (!Array.isArray((exp as any).columns) || (exp as any).columns.length === 0) {
+      issues.push(`cases[${idx}].expected.columns must be a non-empty array of strings.`);
+    }
+    if (!Array.isArray((exp as any).rows)) {
+      issues.push(`cases[${idx}].expected.rows must be an array of rows.`);
+    }
   }
 
   for (let i = 1; i <= testCount; i++) {
-    if (!seen.has(`test_case_${i}`)) return false;
+    const name = `test_case_${i}`;
+    if (!seen.has(name)) {
+      issues.push(`Missing required case "${name}".`);
+    }
   }
 
-  return true;
+  return issues;
 }

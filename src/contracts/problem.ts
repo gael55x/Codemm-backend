@@ -2,7 +2,7 @@ import { z } from "zod";
 import { JavaSourceNoPackageSchema, isValidJUnit5TestSuite } from "../languages/java/rules";
 import { PythonSourceSchema, isValidPytestTestSuite } from "../languages/python/rules";
 import { CppSourceSchema, isValidCppTestSuite } from "../languages/cpp/rules";
-import { SqlQuerySchema, isValidSqlTestSuite } from "../languages/sql/rules";
+import { SqlQuerySchema, diagnoseSqlTestSuite, isValidSqlTestSuite } from "../languages/sql/rules";
 
 function stripJavaComments(source: string): string {
   const withoutBlockComments = source.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -114,10 +114,12 @@ const SqlTestSuiteSchema = z
   .min(1)
   .superRefine((ts, ctx) => {
     if (!isValidSqlTestSuite(ts, 8)) {
+      const issues = diagnoseSqlTestSuite(ts, 8);
+      const detail = issues.length ? ` Details: ${issues.slice(0, 2).join(" ")}` : "";
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "Invalid test_suite: must be JSON with schema_sql + exactly 8 cases named test_case_1..test_case_8 including expected columns/rows.",
+          `Invalid test_suite: must be JSON with schema_sql + exactly 8 cases named test_case_1..test_case_8 including expected columns/rows.${detail}`,
       });
     }
   });

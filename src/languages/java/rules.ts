@@ -39,13 +39,13 @@ export function hasNonTrivialAssertions(testSuite: string): boolean {
 }
 
 /**
- * Flags brittle tests that assert against string literals with leading/trailing
- * whitespace (e.g. " Bob  White "). These cases frequently cause generator
- * instability and aren't useful for v1-style problems.
+ * Flags brittle tests that include string literals with leading/trailing
+ * whitespace (e.g. " Bob  White " or "Open "). These cases frequently cause
+ * generator instability and aren't useful for v1-style problems.
  */
 export function hasBrittleWhitespaceStringExpectations(testSuite: string): boolean {
-  // Look at the first argument of assertEquals("...").
-  const re = /\bassertEquals\s*\(\s*"((?:\\.|[^"\\])*)"\s*,/g;
+  // Best-effort: scan all standard Java string literals.
+  const re = /"((?:\\.|[^"\\])*)"/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(testSuite)) !== null) {
     const literal = match[1] ?? "";

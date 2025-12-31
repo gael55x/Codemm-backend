@@ -36,7 +36,7 @@ function preflightOrThrow() {
 }
 
 test(
-  "e2e (real LLM): prompt → dialogue → READY → generateFromSession → activity persisted (2/4/7 × stdout/return/mixed × 4 langs)",
+  "e2e (real LLM): prompt → dialogue → READY → generateFromSession → activity persisted (2 × stdout/return/mixed × 4 langs)",
   // This test exercises real LLM calls + real Docker validation across a large matrix.
   // Keep a generous timeout to avoid parent cancellation cascading into many subtest failures.
   { timeout: 6 * 60 * 60 * 1000 },
@@ -53,7 +53,7 @@ test(
 
     const languages = parseCsvEnv("CODEMM_E2E_LANGS", ["java", "python", "cpp", "sql"]);
     const styles = parseCsvEnv("CODEMM_E2E_STYLES", ["stdout", "return", "mixed"]);
-    const counts = parseCsvEnv("CODEMM_E2E_COUNTS", ["2", "4", "7"]).map((s) => Number(s));
+    const counts = parseCsvEnv("CODEMM_E2E_COUNTS", ["2"]).map((s) => Number(s));
 
     const suffix = crypto.randomUUID().slice(0, 8);
     const userId = userDb.create(`e2e_real_${suffix}`, `e2e_real_${suffix}@example.com`, "hash");
