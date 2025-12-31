@@ -20,7 +20,9 @@ Codemm backend uses Node's built-in test runner (`node:test`) with CommonJS test
 | Test file | Uses DB | Uses Docker judges | Uses real LLM | What it validates | How to scope it down |
 |---|---:|---:|---:|---|---|
 | `test/integration/languages/activityGenerationEdgeCases.test.js` | ✅ | ❌ | ❌ (stubs) | Dialogue/spec edge-cases + generation plumbing without Docker/LLM flakiness | Run normally; it’s fast |
-| `test/integration/llm/realActivityGenerationE2e.test.js` | ✅ | ✅ | ✅ | Full production flow: prompt → dialogue → plan → per-slot generation → Docker validation → activity persisted | Use `CODEMM_E2E_LANGS`, `CODEMM_E2E_STYLES`, `CODEMM_E2E_COUNTS`, `CODEMM_E2E_PROVIDERS` (comma-separated) |
+| `test/integration/llm/realActivityGenerationE2e.openai.test.js` | ✅ | ✅ | ✅ | Full production flow using OpenAI | Use `CODEMM_E2E_LANGS`, `CODEMM_E2E_STYLES`, `CODEMM_E2E_COUNTS` (comma-separated) |
+| `test/integration/llm/realActivityGenerationE2e.anthropic.test.js` | ✅ | ✅ | ✅ | Full production flow using Anthropic | Use `CODEMM_E2E_LANGS`, `CODEMM_E2E_STYLES`, `CODEMM_E2E_COUNTS` (comma-separated) |
+| `test/integration/llm/realActivityGenerationE2e.gemini.test.js` | ✅ | ✅ | ✅ | Full production flow using Gemini | Use `CODEMM_E2E_LANGS`, `CODEMM_E2E_STYLES`, `CODEMM_E2E_COUNTS` (comma-separated) |
 | `test/integration/llm/realProviderIntegrations.test.js` | ❌ | ❌ | ✅ | Tiny smoke tests for the raw provider adapters (token-costing) | Opt-in: `CODEMM_RUN_REAL_PROVIDER_SMOKE=1` |
 
 ## Conventions
@@ -30,7 +32,7 @@ Codemm backend uses Node's built-in test runner (`node:test`) with CommonJS test
 
 ## Real-LLM e2e (required)
 
-- `test/integration/llm/realActivityGenerationE2e.test.js` runs the full flow (dialogue + generation + Docker validation) and requires:
+- `test/integration/llm/realActivityGenerationE2e.*.test.js` runs the full flow (dialogue + generation + Docker validation) and requires:
   - an LLM API key in the environment (one of `CODEX_API_KEY`/`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`)
   - local Docker running + judge images built (`./run-codem-backend.sh`)
 
@@ -38,9 +40,6 @@ Defaults: this test only runs `CODEMM_E2E_COUNTS=2` unless you override it.
 
 To run a single “cell” in the matrix:
 - `CODEMM_E2E_LANGS=java CODEMM_E2E_STYLES=stdout CODEMM_E2E_COUNTS=2 npm run test:integration`
-
-To restrict which LLM providers are exercised:
-- `CODEMM_E2E_PROVIDERS=openai,gemini npm run test:integration`
 
 ## Debugging generation failures (the errors in your log)
 
