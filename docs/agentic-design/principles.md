@@ -32,7 +32,7 @@ This reduces the blast radius of LLM failures and makes behavior auditable.
 
 ## 3) Contracts first
 
-Codem uses strict schemas for the objects that matter:
+Codemm uses strict schemas for the objects that matter:
 
 - `ActivitySpec` (what to generate)
 - `GeneratedProblemDraft` (draft, includes reference artifact)
@@ -49,7 +49,7 @@ See `state-and-models.md`.
 
 ## 4) Verification over trust
 
-Codem does not trust a generated reference solution. It verifies it:
+Codemm does not trust a generated reference solution. It verifies it:
 
 - compile/execute it in Docker under language-specific constraints
 - require that it passes the generated test suite
@@ -60,7 +60,7 @@ See `pipelines/generation.md`.
 
 ## 5) User-safe observability
 
-Codem exposes progress and optional trace streams, but with strict redaction:
+Codemm exposes progress and optional trace streams, but with strict redaction:
 
 - no prompts
 - no raw generations
@@ -69,4 +69,3 @@ Codem exposes progress and optional trace streams, but with strict redaction:
 Streams are designed to be safe for a learner-facing UI.
 
 See `tools-and-actions.md` and `debugging.md`.
-

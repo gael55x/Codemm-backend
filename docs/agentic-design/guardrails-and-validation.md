@@ -1,6 +1,6 @@
 # Guardrails and Validation
 
-This document describes the guardrails that keep Codem’s agentic behavior safe and predictable.
+This document describes the guardrails that keep Codemm’s agentic behavior safe and predictable.
 
 The key pattern is repeated throughout the backend:
 
@@ -8,7 +8,7 @@ The key pattern is repeated throughout the backend:
 
 ## 1) Schema validation as a gate
 
-Codem uses strict Zod schemas for:
+Codemm uses strict Zod schemas for:
 
 - spec drafts (partial)
 - full specs (complete)
@@ -25,7 +25,7 @@ Some fields are intentionally fixed (or derived deterministically) to reduce amb
 Examples:
 
 - spec version is fixed (e.g., `"1.0"`)
-- test case count is fixed (Codem v1 expects exactly 8 tests)
+- test case count is fixed (Codemm v1 expects exactly 8 tests)
 - language constraints are set to defaults per language
 
 These rules act as “compiler defaults” that the LLM should not override.
@@ -44,7 +44,7 @@ See `core-concepts/difficulty-planning.md`.
 
 ## 4) Confirmation gating for hard fields
 
-Some changes are high-impact or churn-prone (e.g., language, problem count, difficulty plan). Codem can require explicit confirmation before applying such changes.
+Some changes are high-impact or churn-prone (e.g., language, problem count, difficulty plan). Codemm can require explicit confirmation before applying such changes.
 
 Mechanism:
 
@@ -65,7 +65,7 @@ This is critical: problems are “verified” by execution, not by language mode
 
 ## 6) Sanitized observability
 
-Codem exposes progress and (optionally) trace streams, but applies strict redaction:
+Codemm exposes progress and (optionally) trace streams, but applies strict redaction:
 
 - prompts are never streamed
 - raw LLM outputs are never streamed
@@ -74,4 +74,3 @@ Codem exposes progress and (optionally) trace streams, but applies strict redact
 If you add new trace fields, ensure they do not leak any of the above categories.
 
 See `debugging.md`.
-

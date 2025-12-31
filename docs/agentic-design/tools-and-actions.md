@@ -1,6 +1,6 @@
 # Tools and Actions
 
-Codem Backend orchestrates multiple “tools”. This document defines what those tools are allowed to do, and how their outputs are constrained.
+Codemm Backend orchestrates multiple “tools”. This document defines what those tools are allowed to do, and how their outputs are constrained.
 
 ## Tool: LLM completion
 
@@ -69,4 +69,3 @@ Operational behaviors:
 - generation streams may replay buffered events for late subscribers
 
 See `debugging.md` for how to use these streams during development.
-

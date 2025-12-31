@@ -1,6 +1,6 @@
 # Evaluation
 
-Codem evaluates outputs at multiple boundaries. Each boundary exists because it catches a different class of failure.
+Codemm evaluates outputs at multiple boundaries. Each boundary exists because it catches a different class of failure.
 
 ## 1) Spec evaluation (contracts + invariants)
 
@@ -48,4 +48,3 @@ Layering avoids overload:
 - spec evaluation catches structural intent issues early, before generation cost
 - generation evaluation prevents broken problems from persisting
 - submission evaluation isolates untrusted user code inside the sandbox
-

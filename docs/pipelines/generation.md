@@ -14,7 +14,7 @@ Generation consumes a session whose spec is a valid `ActivitySpec`:
 - topic tags
 - problem style (string; normalized by generators)
 - constraints (must match language default constraints)
-- test case count (Codem v1 requires exactly 8)
+- test case count (Codemm v1 requires exactly 8)
 
 See `../state-and-models.md`.
 
@@ -85,7 +85,7 @@ This stage runs *after* Docker verification so scaffolding is based on a known-c
 
 ## Stage 6: Discard reference artifacts (critical)
 
-Codem treats reference artifacts as generation-only:
+Codemm treats reference artifacts as generation-only:
 
 - they are required for verification
 - they must not be persisted
@@ -105,4 +105,3 @@ Events are designed to be safe for user display:
 - no reference artifacts
 
 See `../api/backend.md` and `../debugging.md`.
-

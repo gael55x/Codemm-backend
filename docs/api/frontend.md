@@ -1,6 +1,6 @@
 # Frontend / Client Integration Notes
 
-This document describes backend behaviors that matter when building clients (including the Codem frontend). It complements `backend.md` and focuses on contracts, invariants, and operational expectations.
+This document describes backend behaviors that matter when building clients (including the Codemm frontend). It complements `backend.md` and focuses on contracts, invariants, and operational expectations.
 
 ## Backend URL configuration
 
@@ -52,4 +52,3 @@ For `/run` and `/submit`, clients should respect:
 - language support differences between execution and judging
 
 If you add support for new file layouts in clients, ensure backend validation matches those assumptions.
-

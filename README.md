@@ -1,11 +1,11 @@
 <div align="center">
-  <h1>Codem Backend</h1>
+  <h1>Codemm Backend</h1>
   <p>Implements Codemm’s deterministic session loop, verified generation pipeline, and Docker-based judging APIs.</p>
 </div>
 
 ## Project Overview
 
-Codem Backend is the system of record for Codem’s agentic workflow: it turns user chat into a validated `ActivitySpec`, generates verified problems via Docker, and exposes execution/judging APIs used by the frontend.
+Codemm Backend is the system of record for Codemm’s agentic workflow: it turns user chat into a validated `ActivitySpec`, generates verified problems via Docker, and exposes execution/judging APIs used by the frontend.
 
 Core safety property: the LLM never mutates persisted state directly. It produces proposals that are validated and applied by deterministic code (schemas, invariants, state transitions, and verification).
 
@@ -59,6 +59,14 @@ Health check: `curl -sS http://localhost:${PORT:-4000}/health`
 - API reference: `docs/api/backend.md`
 - Debugging & tracing: `docs/debugging.md`
 - Contributing: `docs/contributing.md`
+
+## Images (Screenshots for Docs)
+
+Documentation screenshots live in `images/` and are referenced by `README.md` and `docs/**/*.md`.
+
+Example:
+
+- ![Codemm activity sample (practice mode)](./images/Codemm-activity-sample-practicemode.png)
 
 ## Contributing
 

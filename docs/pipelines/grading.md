@@ -1,6 +1,6 @@
 # Grading Pipeline
 
-This document describes how Codem judges untrusted code.
+This document describes how Codemm judges untrusted code.
 
 The backend exposes two related endpoints:
 
@@ -76,4 +76,3 @@ Language-specific behavior is encapsulated under:
 When extending languages, preserve the invariant:
 
 - client-visible contracts do not become weaker as languages are added.
-

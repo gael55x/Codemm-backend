@@ -1,6 +1,6 @@
 # Error Handling
 
-Codem’s backend error handling is designed for:
+Codemm’s backend error handling is designed for:
 
 - predictable client behavior (clear HTTP status usage),
 - bounded failure recovery (retries/fallbacks in generation),
@@ -61,4 +61,3 @@ Clients should:
 
 - handle disconnects and reconnects
 - tolerate replayed buffered events
-

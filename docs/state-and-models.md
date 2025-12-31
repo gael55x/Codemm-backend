@@ -9,12 +9,12 @@ This document summarizes the key persisted state and the contracts that flow thr
 Represents “what to generate”. It includes:
 
 - `language` (`java`/`python`/`cpp`/`sql`)
-- `problem_count` (Codem v1: 1–7)
+- `problem_count` (Codemm v1: 1–7)
 - `difficulty_plan` (must sum to problem count)
 - `topic_tags`
 - `problem_style`
 - `constraints` (must match language default constraints)
-- `test_case_count` (Codem v1: exactly 8)
+- `test_case_count` (Codemm v1: exactly 8)
 
 The contract is strict by design: it is the boundary between session loop and generation.
 
@@ -71,4 +71,3 @@ Clients should treat:
 - backend progress events as the canonical generation progress
 
 Client-side derived state should be considered a view cache, not a source of truth.
-

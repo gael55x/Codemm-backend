@@ -1,6 +1,6 @@
 # Feedback Pipeline (Deterministic)
 
-This document describes the implemented “feedback loop” in Codem Backend.
+This document describes the implemented “feedback loop” in Codemm Backend.
 
 The loop is intentionally constrained:
 
@@ -42,4 +42,3 @@ See:
 
 - Core feedback concept: `../core-concepts/feedback.md`
 - Planner boundaries: `../agentic-design/planners.md`
-

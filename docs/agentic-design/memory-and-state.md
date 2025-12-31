@@ -1,6 +1,6 @@
 # Memory and State
 
-Codem Backend maintains multiple “memory” layers. Each layer has a distinct purpose and a distinct set of invariants.
+Codemm Backend maintains multiple “memory” layers. Each layer has a distinct purpose and a distinct set of invariants.
 
 This separation matters because it avoids conflating:
 
@@ -71,4 +71,3 @@ The “collector” exists to support confirmation gating:
 This is a loop-prevention mechanism: it reduces flip-flopping on hard fields and prevents silent changes.
 
 See `guardrails-and-validation.md` for how confirmation interacts with validation.
-

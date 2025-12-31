@@ -2,7 +2,7 @@
 
 This section explains the backend’s agentic behavior in terms of **system invariants** and **deterministic orchestration**, not prompts.
 
-Codem is “agentic” because it:
+Codemm is “agentic” because it:
 
 - Maintains state across turns (session drafts, commitments, collector buffers).
 - Plans and executes multi-step workflows (spec building → planning → generation → verification → persistence).
@@ -22,4 +22,3 @@ It is “deterministic” because:
 - Memory and state models: `memory-and-state.md`
 - Guardrails and validation: `guardrails-and-validation.md`
 - Failure modes and mitigations: `failure-modes.md`
-

@@ -1,6 +1,6 @@
 # Overview
 
-Codem Backend provides three capabilities that the frontend (and other clients) depend on:
+Codemm Backend provides three capabilities that the frontend (and other clients) depend on:
 
 1. **Session-driven spec building**: an interactive loop that turns user chat into a validated `ActivitySpec`.
 2. **Verified generation**: deterministic planning + LLM drafting + contract validation + Docker verification, producing persisted problems.
@@ -14,9 +14,9 @@ The backend is also the system of record for:
 
 ## Key Design Goal: Determinism at the Boundary
 
-Codem is “agentic” because it performs multi-step reasoning and orchestration across user turns and across generation steps.
+Codemm is “agentic” because it performs multi-step reasoning and orchestration across user turns and across generation steps.
 
-Codem is “deterministic” because the LLM is not allowed to directly mutate durable state. The backend enforces this separation:
+Codemm is “deterministic” because the LLM is not allowed to directly mutate durable state. The backend enforces this separation:
 
 - **LLM behavior**: propose patches and drafts (best-effort, fallible).
 - **Deterministic behavior**: validate, apply, gate, retry, verify, and persist.
@@ -27,9 +27,9 @@ This separation is what makes the system auditable and safe to operate:
 - A successful generation is backed by Docker verification, not trust.
 - UI streams are safe: prompts, raw generations, and reference solutions are not exposed.
 
-## What “Verified” Means in Codem
+## What “Verified” Means in Codemm
 
-Codem treats the LLM output as untrusted input. Verification is explicit:
+Codemm treats the LLM output as untrusted input. Verification is explicit:
 
 - Generated problem drafts must satisfy strict schemas (e.g., valid test suites).
 - A generated **reference artifact** must compile and pass all tests in Docker.
@@ -40,4 +40,3 @@ See:
 - Contracts: `state-and-models.md`
 - Generation pipeline: `pipelines/generation.md`
 - Guardrails: `agentic-design/guardrails-and-validation.md`
-

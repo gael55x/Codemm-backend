@@ -1,6 +1,6 @@
 # Contributing
 
-This guide is for contributors working on Codem Backend. The goal is to keep changes safe, deterministic at the boundaries, and easy to review.
+This guide is for contributors working on Codemm Backend. The goal is to keep changes safe, deterministic at the boundaries, and easy to review.
 
 ## Documentation-first changes
 
@@ -74,4 +74,3 @@ Run what is appropriate for your change:
 - full suite: `npm test`
 
 If you change generation or judging, also consider the smoke generation tests (if configured in this repo).
-

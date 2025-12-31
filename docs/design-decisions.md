@@ -17,7 +17,7 @@ Tradeoff:
 
 - requires more deterministic glue code (parsers, schemas, state machines)
 
-## Fixed test count (Codem v1: 8)
+## Fixed test count (Codemm v1: 8)
 
 Decision:
 
@@ -92,4 +92,3 @@ Why:
 Tradeoff:
 
 - less expressive personalization compared to a model-based learner system
-

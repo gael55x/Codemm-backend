@@ -1,12 +1,12 @@
 # Feedback (Deterministic)
 
-In Codem Backend, “feedback” refers to deterministic signals derived from real user behavior that can influence future planning.
+In Codemm Backend, “feedback” refers to deterministic signals derived from real user behavior that can influence future planning.
 
 This is explicitly not an LLM-driven “reflection” loop. It is a data model + deterministic update rule.
 
 ## Learner profile
 
-Codem stores a per-user, per-language learner profile that includes:
+Codemm stores a per-user, per-language learner profile that includes:
 
 - `concept_mastery`: a map of topic → mastery score (`0..1`)
 - `recent_failures`: a compact history of failed concepts and recency
@@ -46,4 +46,3 @@ See:
 
 - Guided pedagogy policy: `../pipelines/feedback.md`
 - Planner boundaries: `../agentic-design/planners.md`
-

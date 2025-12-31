@@ -1,6 +1,6 @@
 # Failure Modes
 
-This document catalogs known failure modes and the mitigation mechanisms Codem uses. It is intentionally framed as: **symptom → cause class → deterministic mitigation**.
+This document catalogs known failure modes and the mitigation mechanisms Codemm uses. It is intentionally framed as: **symptom → cause class → deterministic mitigation**.
 
 ## 1) Spec churn across turns
 
@@ -108,4 +108,3 @@ See `api/backend.md` and `debugging.md`.
 - Design invariant: reference artifacts are never persisted and should never be streamed.
 
 If you add new observability fields, treat them as a security review surface.
-

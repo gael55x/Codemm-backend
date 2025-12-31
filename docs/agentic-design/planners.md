@@ -1,8 +1,8 @@
 # Planners
 
-This document describes **planning vs execution** in Codem Backend.
+This document describes **planning vs execution** in Codemm Backend.
 
-Codem uses “planner” in a narrow sense:
+Codemm uses “planner” in a narrow sense:
 
 - **Planner**: deterministic function(s) that convert a validated spec into an execution plan.
 - **Executor**: the system that performs the plan (LLM calls, Docker validation, persistence).
@@ -49,4 +49,3 @@ This split exists for two reasons:
 
 1) **Auditability**: you can reason about the shape of work without looking at LLM outputs.  
 2) **Stability**: small changes to generation logic should not require rethinking plan semantics.
-

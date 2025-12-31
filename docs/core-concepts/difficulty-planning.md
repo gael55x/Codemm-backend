@@ -1,12 +1,12 @@
 # Difficulty Planning
 
-Difficulty planning is a core invariant in Codem. It is how the user’s intent (“make it mostly easy”) becomes a deterministic, auditable plan that drives generation.
+Difficulty planning is a core invariant in Codemm. It is how the user’s intent (“make it mostly easy”) becomes a deterministic, auditable plan that drives generation.
 
 ## Data model
 
 In `ActivitySpec`, difficulty is represented by:
 
-- `problem_count`: integer (Codem v1 supports 1–7)
+- `problem_count`: integer (Codemm v1 supports 1–7)
 - `difficulty_plan`: a list of `{ difficulty: "easy"|"medium"|"hard", count: number }`
 
 Key invariants:
@@ -17,7 +17,7 @@ Key invariants:
 
 ## Why the invariant exists
 
-Codem’s generation pipeline is slot-based:
+Codemm’s generation pipeline is slot-based:
 
 - each slot corresponds to one problem
 - slot difficulty is derived from `difficulty_plan`
@@ -26,7 +26,7 @@ If `difficulty_plan` does not sum to `problem_count`, the system cannot determin
 
 ## Deterministic shorthand parsing
 
-Codem supports parsing common shorthand replies without depending on exact phrasing. Examples:
+Codemm supports parsing common shorthand replies without depending on exact phrasing. Examples:
 
 - `"easy"` / `"all easy"`
 - `"easy:2 medium:2"`
@@ -51,4 +51,3 @@ See:
 
 - Confirmation gating: `../agentic-design/guardrails-and-validation.md`
 - Memory and commitments: `../agentic-design/memory-and-state.md`
-

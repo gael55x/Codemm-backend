@@ -1,6 +1,6 @@
 # Agents
 
-In Codem Backend, “agent” refers to the orchestration loop that evolves a session across turns. The loop is implemented as deterministic logic that may invoke the LLM as a proposal engine.
+In Codemm Backend, “agent” refers to the orchestration loop that evolves a session across turns. The loop is implemented as deterministic logic that may invoke the LLM as a proposal engine.
 
 This doc describes the lifecycle and orchestration at a conceptual level.
 
@@ -32,7 +32,7 @@ When the spec is complete and supported, the session reaches `READY`.
 
 ## Separation of concerns
 
-Codem keeps these concerns distinct:
+Codemm keeps these concerns distinct:
 
 - **Dialogue / proposal**: “What does the user want?” (LLM can help)
 - **Constraints / contracts**: “What is allowed?” (deterministic)
@@ -43,7 +43,7 @@ This separation is the primary mechanism that prevents prompt drift from becomin
 
 ## Deterministic loop prevention
 
-Codem uses multiple mechanisms to prevent “agent churn”:
+Codemm uses multiple mechanisms to prevent “agent churn”:
 
 - **Commitments**: once a user decision is committed, it is treated as stable.
 - **Confirmation gates**: hard-field changes require explicit user confirmation.
@@ -54,4 +54,3 @@ See:
 - `guardrails-and-validation.md`
 - `memory-and-state.md`
 - `failure-modes.md`
-
