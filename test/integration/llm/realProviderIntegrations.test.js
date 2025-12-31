@@ -12,6 +12,8 @@ const assert = require("node:assert/strict");
 
 const { createCodemmCompletion } = require("../../../src/infra/llm");
 
+const RUN_SMOKE = String(process.env.CODEMM_RUN_REAL_PROVIDER_SMOKE || "").trim() === "1";
+
 function withEnv(t, patch) {
   const keys = Object.keys(patch);
   const prev = {};
@@ -40,6 +42,11 @@ test(
   "llm (real): Anthropic completion works (skips if ANTHROPIC_API_KEY missing)",
   { timeout: 60_000 },
   async (t) => {
+    if (!RUN_SMOKE) {
+      t.skip("Set CODEMM_RUN_REAL_PROVIDER_SMOKE=1 to run real provider smoke tests.");
+      return;
+    }
+
     if (!process.env.ANTHROPIC_API_KEY) {
       t.skip("ANTHROPIC_API_KEY not set");
       return;
@@ -72,6 +79,11 @@ test(
   "llm (real): Gemini completion works (skips if GEMINI_API_KEY/GOOGLE_API_KEY missing)",
   { timeout: 60_000 },
   async (t) => {
+    if (!RUN_SMOKE) {
+      t.skip("Set CODEMM_RUN_REAL_PROVIDER_SMOKE=1 to run real provider smoke tests.");
+      return;
+    }
+
     if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
       t.skip("GEMINI_API_KEY/GOOGLE_API_KEY not set");
       return;
@@ -97,4 +109,3 @@ test(
     assert.ok(/^ok\b/i.test(text), `Unexpected response: ${JSON.stringify(text)}`);
   }
 );
-
