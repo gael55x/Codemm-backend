@@ -151,6 +151,57 @@ test("llm provider: uses Gemini adapter when CODEX_PROVIDER=gemini", async (t) =
   assert.deepEqual(out, { content: [{ type: "text", text: "ok-from-gemini" }] });
 });
 
+test("llm provider: Gemini falls back to flash when preferred model 404s", async (t) => {
+  withEnv(t, {
+    CODEX_PROVIDER: "gemini",
+    CODEX_API_KEY: null,
+    OPENAI_API_KEY: null,
+    ANTHROPIC_API_KEY: null,
+    GEMINI_API_KEY: "gemini_test_key",
+    GOOGLE_API_KEY: null,
+    GEMINI_MODEL: null,
+    CODEX_MODEL: null,
+  });
+
+  let call = 0;
+  stubFetch(t, async (input) => {
+    const url = asUrl(input);
+    call++;
+
+    if (call === 1) {
+      assert.ok(url.includes("/models/gemini-1.5-pro:generateContent"));
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: 404,
+            message:
+              "models/gemini-1.5-pro is not found for API version v1beta, or is not supported for generateContent.",
+            status: "NOT_FOUND",
+          },
+        }),
+        { status: 404, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    assert.ok(url.includes("/models/gemini-1.5-flash:generateContent"));
+    return new Response(
+      JSON.stringify({
+        candidates: [{ content: { parts: [{ text: "ok-from-fallback" }] } }],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  });
+
+  const out = await provider.createCodemmCompletion({
+    system: "SYS",
+    user: "USER",
+    model: "gemini-1.5-pro",
+  });
+
+  assert.equal(call, 2);
+  assert.deepEqual(out, { content: [{ type: "text", text: "ok-from-fallback" }] });
+});
+
 test("llm provider: uses OpenAI adapter when CODEX_PROVIDER=openai", async (t) => {
   withEnv(t, {
     CODEX_PROVIDER: "openai",
