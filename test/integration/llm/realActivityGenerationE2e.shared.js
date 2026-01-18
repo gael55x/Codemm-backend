@@ -136,6 +136,9 @@ function registerRealActivityGenerationE2e({ provider }) {
         for (const language of languages) {
           for (const style of styles) {
             for (const count of counts) {
+              // SQL only supports stdout style reliably across adapters.
+              if (language === "sql" && style !== "stdout") continue;
+
               const label = `${provider} ${language} style=${style} count=${count}`;
               const row = {
                 provider,
