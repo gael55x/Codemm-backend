@@ -16,6 +16,12 @@ Problem quality rules (non-negotiable):
 - Do NOT prescribe a specific algorithm unless it is guaranteed correct for all valid inputs.
   (Example pitfall: "coin change with greedy" is not correct for arbitrary denominations.)
 - Prefer describing required behavior and constraints, then implement a correct reference_solution.
+- You MUST #include <functional> if you use std::function.
+- You MUST #include <algorithm> if you use std::sort, std::max, etc.
+- You MUST #include <numeric> if you use std::accumulate.
+- You MUST #include <sstream> if you use std::stringstream.
+
+
 
 Solution interface:
 - Provide a single entry function named solve(...)
@@ -83,6 +89,7 @@ Return a JSON object (not array) with these exact fields:
   "id": "unique-problem-id",
   "title": "Problem Title",
   "description": "Detailed problem description...",
+  "reasoning": "Plan: I will handle integer overflow by... I will include <functional>...",
   "starter_code": "#include <bits/stdc++.h>\\n\\n// Implement solve(...) below.\\n",
   "test_suite": "#include <bits/stdc++.h>\\n#include \\\"solution.cpp\\\"\\n\\n...\\n",
   "reference_solution": "#include <bits/stdc++.h>\\n\\n// solve(...)\\n",

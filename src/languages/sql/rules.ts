@@ -85,6 +85,9 @@ export function coerceSqlTestSuiteToJsonString(raw: unknown, testCount: number):
 
   const schema_sql = typeof raw.schema_sql === "string" ? raw.schema_sql : "";
 
+  // Helper: strip markdown fences if present
+  const cleanup = (s: string) => s.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/\s*```$/, "");
+
   // Shape A: { schema_sql, cases: [...] }
   if (schema_sql && Array.isArray(raw.cases)) {
     const cases = raw.cases
@@ -118,6 +121,16 @@ export function coerceSqlTestSuiteToJsonString(raw: unknown, testCount: number):
   }
 }
 
+function tryParseSqlSuite(raw: string): any {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Try stripping markdown
+    const clean = raw.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/\s*```$/, "");
+    try { return JSON.parse(clean); } catch { return null; }
+  }
+}
+
 export function isValidSqlTestSuite(raw: string, testCount: number): boolean {
   return diagnoseSqlTestSuite(raw, testCount).length === 0;
 }
@@ -125,10 +138,8 @@ export function isValidSqlTestSuite(raw: string, testCount: number): boolean {
 export function diagnoseSqlTestSuite(raw: string, testCount: number): string[] {
   const issues: string[] = [];
 
-  let parsed: any;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
+  let parsed = tryParseSqlSuite(raw);
+  if (!parsed) {
     return ["test_suite is not valid JSON."];
   }
 
