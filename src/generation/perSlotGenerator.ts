@@ -338,6 +338,7 @@ ${previousJson || "(not provided)"}
 
 Goal:
 - Return corrected JSON with the exact same fields.
+- REQUIRED: Update the "reasoning" field to explain why the previous solution failed and how you are fixing it.
 - Prefer keeping id/title/description/starter_code stable.
 - Prefer fixing the reference solution artifact to satisfy the existing tests.
 - Only change test_suite if it is clearly inconsistent with the description or contains an obvious mistake; otherwise keep tests stable.
@@ -397,6 +398,7 @@ ${previousJson || "(not provided)"}
 
 Goal:
 - Return corrected JSON with the exact same fields.
+- REQUIRED: Update the "reasoning" field to explain why the previous solution failed and how you are fixing it.
 - Prefer keeping id/title/description/starter_code stable.
 - You MAY update test_suite and/or reference_solution, but the final pair MUST pass in Docker/pytest.
 
@@ -456,6 +458,7 @@ ${previousJson || "(not provided)"}
 
 Goal:
 - Return corrected JSON with the exact same fields.
+- REQUIRED: Update the "reasoning" field to explain why the previous solution failed and how you are fixing it.
 - Prefer keeping id/title/description/starter_code stable.
 - You MAY update test_suite and/or reference_solution, but the final pair MUST pass in Docker/g++.
 
@@ -498,7 +501,8 @@ Hard structure rules (do not violate):
 - starter_code and reference_solution must be a single read-only query (WITH/SELECT only)
 - test_suite must be valid JSON (not code); include schema_sql + 8 cases
 - Each case expected.columns must match actual output column names
-- If order matters, set order_matters=true and include ORDER BY in the query
+- KEY FIX: If "Expected rows" mismatches "Actual rows" by order, you MUST add "ORDER BY" to the query and set "order_matters": true.
+- KEY FIX: If "Actual rows" are empty or wrong, check your JOIN/WHERE logic.
 
 Here is your previous output (may be truncated):
 ${rawSnippet || "(not provided)"}
@@ -508,6 +512,7 @@ ${previousJson || "(not provided)"}
 
 Goal:
 - Return corrected JSON with the exact same fields.
+- REQUIRED: Update the "reasoning" field to explain why the previous solution failed and how you are fixing it.
 - Prefer keeping id/title/description/starter_code stable.
 - You MAY update test_suite and/or reference_solution, but the final pair MUST pass in Docker/SQLite.
 
@@ -880,10 +885,10 @@ export async function generateSingleProblem(
       return { draft: parsed, meta: { llmOutputHash } };
     }
 
-	    if (slot.language === "sql") {
-	      if (raw.workspace || raw.reference_workspace) {
-	        throw new Error("SQL generation does not support workspace problems.");
-	      }
+    if (slot.language === "sql") {
+      if (raw.workspace || raw.reference_workspace) {
+        throw new Error("SQL generation does not support workspace problems.");
+      }
 
       const baseId =
         typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : crypto.randomUUID();
@@ -902,10 +907,10 @@ export async function generateSingleProblem(
         typeof raw.starter_code === "string" && raw.starter_code.trim() ? raw.starter_code.trim() : "";
       if (!starterCode.trim()) starterCode = "SELECT 1;";
 
-	      const testSuite = coerceSqlTestSuiteToJsonString((raw as any).test_suite, 8);
-	      if (!testSuite.trim()) {
-	        throw new Error(`Invalid test_suite for slot ${slot.index}: missing.`);
-	      }
+      const testSuite = coerceSqlTestSuiteToJsonString((raw as any).test_suite, 8);
+      if (!testSuite.trim()) {
+        throw new Error(`Invalid test_suite for slot ${slot.index}: missing.`);
+      }
 
       const referenceSolution =
         typeof raw.reference_solution === "string" && raw.reference_solution.trim()
